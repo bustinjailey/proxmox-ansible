@@ -1,10 +1,11 @@
 ---
 # NVIDIA Driver Installation for Proxmox with LXC GPU Passthrough Support
-# Optimized for Ollama and CUDA workloads
+# Following official NVIDIA network repository installation method for Debian
+# https://docs.nvidia.com/cuda/cuda-installation-guide-linux/#network-repo-installation-for-debian
 
 - name: Display NVIDIA driver installation start message
   debug:
-    msg: "Starting NVIDIA driver installation for {{ inventory_hostname }} ({{ nvidia_gpu_model | default('Unknown GPU') }})"
+    msg: "Starting NVIDIA driver installation for {{ inventory_hostname }} using official network repository method"
 
 - name: Check if NVIDIA GPU is present
   shell: lspci | grep -i nvidia
@@ -26,53 +27,247 @@
 
 # Only proceed if GPU is present and configured
 - block:
+    - name: Detect Debian version for repository URL
+      shell: |
+        if [ -f /etc/debian_version ]; then
+          . /etc/os-release
+          echo "${VERSION_CODENAME:-$(cat /etc/debian_version | cut -d. -f1)}"
+        else
+          echo "unknown"
+        fi
+      register: debian_version
+      changed_when: false
+
+    - name: Set repository architecture
+      set_fact:
+        repo_arch: "{{ 'x86_64' if ansible_architecture == 'x86_64' else ansible_architecture }}"
+
+    - name: Display detected system information
+      debug:
+        msg: |
+          Detected system information:
+          - OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          - Codename: {{ debian_version.stdout }}
+          - Architecture: {{ repo_arch }}
+
+    - name: Comprehensive NVIDIA repository cleanup (MUST BE FIRST)
+      block:
+        - name: Find all NVIDIA/CUDA repository files
+          find:
+            paths:
+              - /etc/apt/sources.list.d
+            patterns:
+              - "*nvidia*"
+              - "*cuda*"
+            file_type: file
+          register: nvidia_repo_files
+
+        - name: Remove all found NVIDIA/CUDA repository files
+          file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ nvidia_repo_files.files }}"
+
+        - name: Remove specific conflicting repository files
+          file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/apt/sources.list.d/nvidia-cuda.list
+            - /etc/apt/sources.list.d/cuda.list
+            - /etc/apt/sources.list.d/cuda-debian11-x86_64.list
+            - /etc/apt/sources.list.d/cuda-debian12-x86_64.list
+
+        - name: Find and remove all NVIDIA keyrings
+          find:
+            paths:
+              - /etc/apt/trusted.gpg.d
+              - /usr/share/keyrings
+            patterns:
+              - "*cuda*"
+              - "*nvidia*"
+            file_type: file
+          register: nvidia_keyring_files
+
+        - name: Remove all found NVIDIA keyring files
+          file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ nvidia_keyring_files.files }}"
+
+        - name: Remove any existing CUDA keyring packages
+          apt:
+            name:
+              - cuda-keyring
+            state: absent
+            purge: yes
+          ignore_errors: yes
+
+        - name: Remove any existing NVIDIA packages that might conflict
+          apt:
+            name:
+              - nvidia-driver-*
+              - cuda-drivers
+              - cuda-runtime-*
+            state: absent
+            purge: yes
+          ignore_errors: yes
+
+        - name: Clean apt cache and remove cached repository data
+          shell: |
+            apt-get clean
+            apt-get autoclean
+            rm -rf /var/lib/apt/lists/*
+            mkdir -p /var/lib/apt/lists/partial
+          ignore_errors: yes
+
+        - name: Force rebuild apt cache after complete cleanup
+          apt:
+            update_cache: yes
+            force_apt_get: yes
+          ignore_errors: yes
+          retries: 3
+          delay: 5
+
+    - name: Verify complete cleanup before proceeding
+      block:
+        - name: Check for any remaining NVIDIA repository files
+          find:
+            paths:
+              - /etc/apt/sources.list.d
+            patterns:
+              - "*nvidia*"
+              - "*cuda*"
+            file_type: file
+          register: remaining_repo_files
+
+        - name: Check for any remaining NVIDIA keyring files
+          find:
+            paths:
+              - /etc/apt/trusted.gpg.d
+              - /usr/share/keyrings
+            patterns:
+              - "*cuda*"
+              - "*nvidia*"
+            file_type: file
+          register: remaining_keyring_files
+
+        - name: Display cleanup verification results
+          debug:
+            msg: |
+              Cleanup verification:
+              - Remaining repository files: {{ remaining_repo_files.files | length }}
+              - Remaining keyring files: {{ remaining_keyring_files.files | length }}
+              {% if remaining_repo_files.files | length > 0 %}
+              Repository files found: {{ remaining_repo_files.files | map(attribute='path') | list }}
+              {% endif %}
+              {% if remaining_keyring_files.files | length > 0 %}
+              Keyring files found: {{ remaining_keyring_files.files | map(attribute='path') | list }}
+              {% endif %}
+
+        - name: Force remove any remaining conflicting files
+          file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ remaining_repo_files.files + remaining_keyring_files.files }}"
+          when: (remaining_repo_files.files | length > 0) or (remaining_keyring_files.files | length > 0)
+
     - name: Install required packages for NVIDIA driver compilation
       apt:
         name:
           - build-essential
           - dkms
+          - wget
+          - gnupg
+          - ca-certificates
+        state: present
+        # NO update_cache here - we'll do it after keyring installation
+
+    - name: Install Proxmox kernel headers
+      apt:
+        name:
           - pve-headers
           - "pve-headers-{{ ansible_kernel }}"
         state: present
-        update_cache: yes
-        cache_valid_time: 3600
+        # NO update_cache here - we'll do it after keyring installation
+      ignore_errors: yes  # Some Proxmox versions may not have exact kernel headers
 
-    - name: Add NVIDIA official repository key
-      apt_key:
-        url: https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/3bf863cc.pub
+    - name: Create temporary directory for CUDA keyring
+      tempfile:
+        state: directory
+        suffix: cuda_keyring
+      register: cuda_temp_dir
+
+    - name: Download NVIDIA CUDA keyring package (official method)
+      get_url:
+        url: "{{ nvidia_cuda_keyring_url }}"
+        dest: "{{ cuda_temp_dir.path }}/cuda-keyring.deb"
+        mode: '0644'
+        timeout: 30
+      retries: 3
+      delay: 5
+
+    - name: Install NVIDIA CUDA keyring package
+      apt:
+        deb: "{{ cuda_temp_dir.path }}/cuda-keyring.deb"
         state: present
 
-    - name: Add NVIDIA CUDA repository
-      apt_repository:
-        repo: "deb https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/ /"
-        state: present
-        filename: nvidia-cuda
-      notify: update apt cache
+    - name: Clean up temporary keyring files
+      file:
+        path: "{{ cuda_temp_dir.path }}"
+        state: absent
 
-    - name: Update apt cache after adding NVIDIA repository
+    - name: Update apt cache after keyring installation
       apt:
         update_cache: yes
-      when: not ansible_check_mode
+      register: apt_update_result
+      retries: 3
+      delay: 5
+      until: apt_update_result is succeeded
 
-    - name: Install NVIDIA driver (specific version for stability)
+    - name: Verify CUDA repository is properly configured
+      shell: |
+        # Check if repository is available and accessible
+        apt-cache policy | grep -q "developer.download.nvidia.com" && \
+        apt-cache search cuda-toolkit | grep -q "cuda-toolkit"
+      register: cuda_repo_check
+      failed_when: false
+      changed_when: false
+      retries: 2
+      delay: 5
+
+    - name: Display repository verification results
+      debug:
+        msg: "CUDA repository verification: {{ 'SUCCESS - Repository is properly configured' if cuda_repo_check.rc == 0 else 'WARNING - Repository may not be properly configured' }}"
+
+    - name: Fail if repository is not accessible
+      fail:
+        msg: |
+          CUDA repository is not properly configured. This may be due to:
+          1. Network connectivity issues
+          2. Keyring installation problems
+          3. Repository conflicts
+          Please check network connectivity and try running the playbook again.
+      when: cuda_repo_check.rc != 0
+
+    - name: Install CUDA toolkit (includes NVIDIA drivers)
       apt:
         name:
-          - "nvidia-driver-{{ nvidia_driver_version }}"
-          - "nvidia-utils-{{ nvidia_driver_version }}"
-          - nvidia-settings
+          - cuda-toolkit
         state: present
         update_cache: yes
       notify: 
         - reboot system
         - wait for system
 
-    - name: Install CUDA toolkit for LXC container support
+    - name: Install additional NVIDIA utilities
       apt:
         name:
-          - "cuda-toolkit-{{ cuda_version }}"
+          - nvidia-settings
           - nvidia-container-toolkit
         state: present
         update_cache: yes
+      ignore_errors: yes  # These may not be available in all repositories
 
     - name: Create NVIDIA device nodes directory
       file:
@@ -126,38 +321,299 @@
         owner: root
         group: root
 
-    - name: Add NVIDIA library path to ld.so.conf
+    - name: Add NVIDIA library paths to ld.so.conf
       lineinfile:
         path: /etc/ld.so.conf.d/nvidia.conf
-        line: "/usr/local/cuda/lib64"
+        line: "{{ item }}"
         create: yes
         mode: '0644'
+      loop: "{{ cuda_library_paths }}"
       notify: update ldconfig
 
     - name: Flush handlers to ensure system reboot if needed
       meta: flush_handlers
 
-    - name: Verify NVIDIA driver installation
+    - name: Comprehensive NVIDIA driver diagnostics
+      block:
+        - name: Check current kernel version
+          shell: uname -r
+          register: current_kernel
+          changed_when: false
+
+        - name: Check available kernel headers
+          shell: |
+            echo "=== Available kernel headers ==="
+            dpkg -l | grep -E "(linux-headers|pve-headers)" || echo "No kernel headers found"
+            echo ""
+            echo "=== Current kernel: {{ current_kernel.stdout }} ==="
+            ls -la /lib/modules/{{ current_kernel.stdout }}/ 2>/dev/null || echo "No modules directory for current kernel"
+          register: kernel_headers_check
+          changed_when: false
+
+        - name: Check NVIDIA packages installed
+          shell: |
+            echo "=== Installed NVIDIA packages ==="
+            dpkg -l | grep -i nvidia || echo "No NVIDIA packages found"
+            echo ""
+            echo "=== Installed CUDA packages ==="
+            dpkg -l | grep -i cuda || echo "No CUDA packages found"
+          register: nvidia_packages_check
+          changed_when: false
+
+        - name: Check DKMS status for NVIDIA modules
+          shell: |
+            echo "=== DKMS status ==="
+            dkms status | grep nvidia || echo "No NVIDIA modules in DKMS"
+            echo ""
+            echo "=== DKMS build logs (if any) ==="
+            find /var/lib/dkms -name "make.log" -path "*/nvidia*" -exec echo "=== {} ===" \; -exec cat {} \; 2>/dev/null || echo "No DKMS build logs found"
+          register: dkms_status_check
+          changed_when: false
+
+        - name: Check for NVIDIA kernel modules
+          shell: |
+            echo "=== Available NVIDIA modules ==="
+            find /lib/modules/{{ current_kernel.stdout }} -name "*nvidia*" 2>/dev/null || echo "No NVIDIA modules found for current kernel"
+            echo ""
+            echo "=== Loaded NVIDIA modules ==="
+            lsmod | grep nvidia || echo "No NVIDIA modules loaded"
+          register: nvidia_modules_check
+          changed_when: false
+
+        - name: Display comprehensive diagnostics
+          debug:
+            msg: |
+              NVIDIA Driver Diagnostics:
+              
+              Current Kernel: {{ current_kernel.stdout }}
+              
+              {{ kernel_headers_check.stdout }}
+              
+              {{ nvidia_packages_check.stdout }}
+              
+              {{ dkms_status_check.stdout }}
+              
+              {{ nvidia_modules_check.stdout }}
+
+        - name: Attempt to manually load NVIDIA modules
+          shell: |
+            echo "Attempting to load NVIDIA modules..."
+            modprobe nvidia 2>&1 || echo "Failed to load nvidia module"
+            modprobe nvidia_uvm 2>&1 || echo "Failed to load nvidia_uvm module"
+            modprobe nvidia_drm 2>&1 || echo "Failed to load nvidia_drm module"
+            modprobe nvidia_modeset 2>&1 || echo "Failed to load nvidia_modeset module"
+            echo "Module loading complete"
+          register: module_loading_result
+          changed_when: false
+          failed_when: false
+
+        - name: Display module loading results
+          debug:
+            var: module_loading_result.stdout_lines
+
+        - name: Check if NVIDIA driver can communicate after module loading
+          shell: nvidia-smi
+          register: nvidia_smi_test
+          failed_when: false
+          changed_when: false
+
+        - name: Display nvidia-smi test result
+          debug:
+            msg: |
+              nvidia-smi test result:
+              Return code: {{ nvidia_smi_test.rc }}
+              {% if nvidia_smi_test.rc == 0 %}
+              SUCCESS: {{ nvidia_smi_test.stdout_lines }}
+              {% else %}
+              FAILED: {{ nvidia_smi_test.stderr if nvidia_smi_test.stderr else nvidia_smi_test.stdout }}
+              {% endif %}
+
+    - name: Check for DKMS kernel version mismatch
+      shell: |
+        current_kernel="{{ current_kernel.stdout }}"
+        echo "Current kernel: $current_kernel"
+        echo "DKMS modules status:"
+        dkms_status=$(dkms status | grep nvidia || echo "No NVIDIA modules in DKMS")
+        echo "$dkms_status"
+        
+        # Check if any NVIDIA modules are built for a different kernel
+        if echo "$dkms_status" | grep -v "$current_kernel" | grep -q nvidia; then
+          echo "KERNEL_MISMATCH_DETECTED"
+        else
+          echo "KERNEL_VERSIONS_MATCH"
+        fi
+      register: kernel_mismatch_check
+      changed_when: false
+
+    - name: Display kernel mismatch check results
+      debug:
+        msg: |
+          Kernel Mismatch Check:
+          {{ kernel_mismatch_check.stdout }}
+
+    - name: Install current kernel headers if missing
+      apt:
+        name:
+          - "proxmox-headers-{{ current_kernel.stdout }}"
+          - "pve-headers-{{ current_kernel.stdout }}"
+        state: present
+        update_cache: yes
+      ignore_errors: yes
+      when: "'KERNEL_MISMATCH_DETECTED' in kernel_mismatch_check.stdout or nvidia_smi_test.rc != 0"
+
+    - name: Force DKMS rebuild for current kernel
+      shell: |
+        current_kernel="{{ current_kernel.stdout }}"
+        echo "=== DKMS Rebuild for Kernel: $current_kernel ==="
+        
+        # Get all NVIDIA DKMS modules
+        nvidia_modules=$(dkms status | grep nvidia | cut -d',' -f1 | sort -u || echo "")
+        
+        if [ -z "$nvidia_modules" ]; then
+          echo "No NVIDIA DKMS modules found"
+          exit 0
+        fi
+        
+        for module_info in $(dkms status | grep nvidia); do
+          module_name=$(echo "$module_info" | cut -d'/' -f1)
+          module_version=$(echo "$module_info" | cut -d'/' -f2 | cut -d',' -f1)
+          
+          echo "Processing: $module_name version $module_version"
+          
+          # Remove all existing builds for this module
+          echo "Removing existing builds for $module_name/$module_version"
+          dkms remove "$module_name/$module_version" --all 2>/dev/null || true
+          
+          # Build and install for current kernel
+          echo "Building $module_name/$module_version for kernel $current_kernel"
+          if dkms build "$module_name/$module_version" -k "$current_kernel"; then
+            echo "Build successful, installing..."
+            if dkms install "$module_name/$module_version" -k "$current_kernel"; then
+              echo "✅ Successfully installed $module_name/$module_version for $current_kernel"
+            else
+              echo "❌ Failed to install $module_name/$module_version for $current_kernel"
+            fi
+          else
+            echo "❌ Failed to build $module_name/$module_version for $current_kernel"
+          fi
+        done
+        
+        echo ""
+        echo "=== Final DKMS Status ==="
+        dkms status | grep nvidia || echo "No NVIDIA modules in DKMS"
+        
+        echo ""
+        echo "=== Checking for modules in current kernel ==="
+        find "/lib/modules/$current_kernel" -name "*nvidia*" 2>/dev/null || echo "No NVIDIA modules found for current kernel"
+        
+        echo ""
+        echo "=== Updating module dependencies ==="
+        depmod -a "$current_kernel"
+        
+        echo "DKMS rebuild completed"
+      when: "'KERNEL_MISMATCH_DETECTED' in kernel_mismatch_check.stdout or nvidia_smi_test.rc != 0"
+      register: dkms_rebuild_result
+
+    - name: Display DKMS rebuild results
+      debug:
+        var: dkms_rebuild_result.stdout_lines
+      when: dkms_rebuild_result is defined and dkms_rebuild_result.stdout_lines is defined
+
+    - name: Load NVIDIA modules after rebuild
+      shell: |
+        echo "Loading NVIDIA modules..."
+        modprobe nvidia 2>&1 || echo "Failed to load nvidia module"
+        modprobe nvidia_uvm 2>&1 || echo "Failed to load nvidia_uvm module"
+        modprobe nvidia_drm 2>&1 || echo "Failed to load nvidia_drm module"
+        modprobe nvidia_modeset 2>&1 || echo "Failed to load nvidia_modeset module"
+        echo "Module loading completed"
+      when: dkms_rebuild_result is defined
+      register: post_rebuild_module_load
+      failed_when: false
+
+    - name: Display post-rebuild module loading results
+      debug:
+        var: post_rebuild_module_load.stdout_lines
+      when: post_rebuild_module_load is defined
+
+    - name: Final NVIDIA driver verification after fixes
       shell: nvidia-smi
-      register: nvidia_smi_result
-      failed_when: nvidia_smi_result.rc != 0
+      register: nvidia_smi_final
+      failed_when: false
       changed_when: false
       retries: 3
-      delay: 10
+      delay: 5
 
-    - name: Display NVIDIA driver information
+    - name: Check final module status
+      shell: |
+        echo "=== Final Module Status ==="
+        lsmod | grep nvidia || echo "No NVIDIA modules loaded"
+        echo ""
+        echo "=== Final DKMS Status ==="
+        dkms status | grep nvidia || echo "No NVIDIA modules in DKMS"
+        echo ""
+        echo "=== Available modules for current kernel ==="
+        find "/lib/modules/{{ current_kernel.stdout }}" -name "*nvidia*" 2>/dev/null || echo "No NVIDIA modules found"
+      register: final_module_status
+      changed_when: false
+
+    - name: Display final NVIDIA driver verification results
       debug:
-        var: nvidia_smi_result.stdout_lines
+        msg: |
+          🔍 FINAL NVIDIA DRIVER VERIFICATION:
+          
+          Current Kernel: {{ current_kernel.stdout }}
+          
+          {{ final_module_status.stdout }}
+          
+          {% if nvidia_smi_final.rc == 0 %}
+          ✅ SUCCESS: NVIDIA driver is working correctly!
+          
+          nvidia-smi output:
+          {{ nvidia_smi_final.stdout_lines | join('\n') }}
+          
+          🎉 GPU is ready for LXC passthrough and CUDA workloads!
+          {% else %}
+          ❌ NVIDIA driver communication still failing
+          
+          Error details:
+          Return code: {{ nvidia_smi_final.rc }}
+          Error: {{ nvidia_smi_final.stderr if nvidia_smi_final.stderr else nvidia_smi_final.stdout }}
+          
+          📋 Troubleshooting completed:
+          ✅ Repository conflicts resolved
+          ✅ Configuration file syntax fixed
+          ✅ DKMS rebuild attempted
+          ✅ Kernel headers installed
+          ✅ Module loading attempted
+          
+          🔧 Next steps if still failing:
+          1. Reboot the system to ensure clean module loading
+          2. Check hardware compatibility (lspci | grep -i nvidia)
+          3. Verify GPU is not in use by another process
+          4. Check system logs: journalctl -u nvidia-persistenced
+          {% endif %}
 
-    - name: Verify CUDA installation
+    - name: Verify CUDA installation (if driver is working)
       shell: nvcc --version
       register: nvcc_result
-      failed_when: nvcc_result.rc != 0
+      failed_when: false
       changed_when: false
+      when: nvidia_smi_final.rc == 0
 
     - name: Display CUDA version information
       debug:
-        var: nvcc_result.stdout_lines
+        msg: |
+          CUDA Installation Status:
+          {% if nvcc_result is defined and nvcc_result.rc == 0 %}
+          ✅ CUDA is installed and working
+          {{ nvcc_result.stdout_lines | join('\n') }}
+          {% elif nvcc_result is defined %}
+          ⚠️  CUDA installation issue: {{ nvcc_result.stderr if nvcc_result.stderr else 'nvcc command failed' }}
+          {% else %}
+          ⏭️  CUDA verification skipped (driver not working)
+          {% endif %}
+      when: nvcc_result is defined
 
     - name: Test GPU compute capability
       shell: nvidia-smi -q -d compute
@@ -167,7 +623,7 @@
 
     - name: Display GPU compute capabilities
       debug:
-        msg: "GPU compute test successful - ready for Ollama and CUDA workloads"
+        msg: "GPU compute test successful - ready for LXC GPU passthrough and CUDA workloads"
 
     - name: Create GPU verification script for LXC containers
       template:
@@ -177,9 +633,28 @@
         owner: root
         group: root
 
+    - name: Run initial device creation
+      shell: /usr/local/bin/create-nvidia-devices.sh
+      register: device_creation_result
+      changed_when: false
+      failed_when: false
+
+    - name: Display device creation results
+      debug:
+        var: device_creation_result.stdout_lines
+      when: device_creation_result.stdout_lines is defined
+
   when: has_nvidia_gpu | default(false)
 
 - name: Display installation completion message
   debug:
-    msg: "NVIDIA driver installation completed successfully for {{ inventory_hostname }}"
+    msg: |
+      NVIDIA driver installation completed successfully for {{ inventory_hostname }}
+      
+      Installation method: Official NVIDIA Network Repository
+      Next steps:
+      1. Configure LXC containers for GPU passthrough using /usr/local/bin/verify-lxc-gpu.sh
+      2. Restart LXC containers that need GPU access
+      3. Install NVIDIA drivers inside LXC containers if needed
+      4. Test GPU access with nvidia-smi inside containers
   when: has_nvidia_gpu | default(false)

@@ -1,5 +1,6 @@
 ---
 # Handlers for NVIDIA driver installation and configuration
+# Updated for official network repository installation method
 
 - name: update apt cache
   apt:
@@ -7,9 +8,10 @@
 
 - name: reboot system
   reboot:
-    reboot_timeout: 600
+    reboot_timeout: "{{ installation_config.reboot_timeout | default(600) }}"
     connect_timeout: 20
     test_command: uptime
+    msg: "Rebooting system after NVIDIA driver installation"
   when: not ansible_check_mode
 
 - name: wait for system
@@ -42,14 +44,10 @@
   changed_when: false
 
 - name: load nvidia modules
-  modprobe:
-    name: "{{ item }}"
-    state: present
-  loop:
-    - nvidia
-    - nvidia_uvm
-    - nvidia_drm
+  shell: modprobe {{ item }}
+  loop: "{{ nvidia_modules }}"
   failed_when: false
+  changed_when: false
 
 - name: restart nvidia services
   systemd:
@@ -59,4 +57,31 @@
   loop:
     - nvidia-devices
     - nvidia-persistenced
+  failed_when: false
+
+- name: create nvidia device nodes
+  shell: /usr/local/bin/create-nvidia-devices.sh
+  changed_when: false
+  failed_when: false
+
+- name: verify nvidia installation
+  shell: nvidia-smi
+  register: nvidia_verification
+  changed_when: false
+  failed_when: false
+  retries: 3
+  delay: 10
+
+- name: display nvidia verification
+  debug:
+    var: nvidia_verification.stdout_lines
+  when: nvidia_verification.stdout_lines is defined
+
+- name: cleanup temp files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/cuda-keyring.deb
+    - /tmp/nvidia-installer.log
   failed_when: false

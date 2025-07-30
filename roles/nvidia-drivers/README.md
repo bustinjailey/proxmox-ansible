@@ -1,32 +1,34 @@
 # NVIDIA Drivers Role
 
-This role installs and configures NVIDIA drivers with CUDA support for Proxmox hosts, specifically optimized for LXC GPU passthrough and Ollama workloads.
+This role installs and configures NVIDIA drivers with CUDA support for Proxmox hosts using the **official NVIDIA network repository method**, specifically optimized for LXC GPU passthrough and GPU workloads.
 
 ## Overview
 
 This role provides a comprehensive solution for NVIDIA GPU support on Proxmox hosts, including:
 
-- **Proxmox-compatible NVIDIA driver installation**
+- **Official NVIDIA Network Repository Installation** - Following NVIDIA's documented Debian installation method
+- **Automatic Driver Version Management** - Repository determines the best compatible driver version
 - **CUDA toolkit for compute workloads**
 - **LXC GPU passthrough configuration**
 - **Device node management for containers**
 - **Verification and testing tools**
-- **Ollama optimization**
+- **Proxmox compatibility** - Works with Proxmox kernel headers
 
 ## Features
 
-- ✅ **Proxmox Compatibility**: Uses proper kernel headers and stable driver versions
+- ✅ **Official NVIDIA Method**: Uses the official network repository installation from NVIDIA documentation
+- ✅ **Automatic Version Management**: Repository automatically selects compatible driver and CUDA versions
+- ✅ **Proxmox Compatibility**: Uses proper kernel headers and tested installation method
 - ✅ **LXC GPU Passthrough**: Complete configuration for container GPU access
 - ✅ **CUDA Support**: Full CUDA toolkit installation for compute workloads
 - ✅ **Automatic Device Management**: Creates and manages NVIDIA device nodes
 - ✅ **Verification Tools**: Comprehensive testing and validation scripts
-- ✅ **Ollama Optimized**: Specifically configured for optimal Ollama performance
 - ✅ **Error Handling**: Robust error detection and recovery procedures
 
 ## Requirements
 
 ### Hardware
-- NVIDIA GPU (tested with Quadro T2000)
+- NVIDIA GPU (tested with various models including Quadro T2000)
 - Proxmox VE host
 
 ### Software
@@ -44,16 +46,28 @@ nvidia_gpu_model: "Quadro T2000"       # GPU model (documentation only)
 
 ### Optional Variables
 ```yaml
-# Driver versions (defined in vars/main.yml)
-nvidia_driver_version: "535"           # NVIDIA driver version
-cuda_version: "12-2"                   # CUDA version
+# Installation configuration (defined in vars/main.yml)
+nvidia_cuda_keyring_url: "https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb"
 
-# Ollama optimizations
-ollama_gpu_optimizations:
-  enable_persistence: true             # Enable GPU persistence mode
-  enable_mig: false                    # Disable Multi-Instance GPU
-  power_limit: null                    # Set power limit (watts) if needed
-  compute_mode: "Default"              # GPU compute mode
+# GPU optimizations
+gpu_optimizations:
+  persistence_mode: true               # Enable GPU persistence mode
+  lxc:
+    device_file_uid: 0                 # Device file ownership
+    device_file_gid: 0
+    device_file_mode: "0666"           # Device file permissions
+  performance:
+    enable_mig: false                  # Disable Multi-Instance GPU
+    power_limit: null                  # Set power limit (watts) if needed
+    compute_mode: "Default"            # GPU compute mode
+
+# Installation timeouts and retries
+installation_config:
+  download_timeout: 30
+  download_retries: 3
+  verification_retries: 5
+  verification_delay: 10
+  reboot_timeout: 600
 ```
 
 ## Dependencies
@@ -62,8 +76,8 @@ This role automatically installs:
 - `build-essential` - Compilation tools
 - `dkms` - Dynamic kernel module support
 - `pve-headers` - Proxmox kernel headers
-- `nvidia-driver-535` - NVIDIA driver
-- `cuda-toolkit-12-2` - CUDA development toolkit
+- `cuda-toolkit` - NVIDIA CUDA toolkit (includes drivers)
+- `nvidia-settings` - NVIDIA configuration utilities
 - `nvidia-container-toolkit` - Container GPU support
 
 ## Example Playbook
@@ -96,7 +110,7 @@ all:
 
 ## LXC Container Configuration
 
-After running this role, configure your Ollama LXC container by adding these lines to `/etc/pve/lxc/<CONTAINER_ID>.conf`:
+After running this role, configure your LXC container by adding these lines to `/etc/pve/lxc/<CONTAINER_ID>.conf`:
 
 ```bash
 # GPU Device Access
@@ -145,31 +159,20 @@ ls -la /dev/nvidia*
 # Test NVIDIA driver (after installing in container)
 nvidia-smi
 
-# Test with Docker (if using containerized Ollama)
+# Test with Docker (if using containerized workloads)
 docker run --gpus all nvidia/cuda:11.0-base nvidia-smi
 ```
 
-## Ollama Setup
+## Installation Method
 
-After GPU passthrough is configured:
+This role follows the official NVIDIA network repository installation method:
 
-1. **Install NVIDIA drivers in the LXC container**:
-   ```bash
-   # Inside the container
-   apt update
-   apt install nvidia-driver-535
-   ```
-
-2. **Install Ollama**:
-   ```bash
-   curl -fsSL https://ollama.ai/install.sh | sh
-   ```
-
-3. **Verify GPU access**:
-   ```bash
-   ollama run llama2
-   # Should show GPU utilization in nvidia-smi
-   ```
+1. **Download CUDA Keyring**: Uses `wget` to download the official CUDA keyring package
+2. **Install Keyring**: Installs keyring with `dpkg -i` to set up the repository
+3. **Update Repository**: Updates APT cache to access NVIDIA packages
+4. **Install CUDA Toolkit**: Installs `cuda-toolkit` which includes compatible drivers
+5. **Configure LXC Support**: Sets up device nodes and passthrough configuration
+6. **Verify Installation**: Tests driver and CUDA functionality
 
 ## Troubleshooting
 
@@ -185,7 +188,7 @@ After GPU passthrough is configured:
 **Solution**:
 1. Check CUDA installation: `nvcc --version`
 2. Verify library path: `ldconfig -p | grep cuda`
-3. Source CUDA environment: `export PATH=/usr/local/cuda/bin:$PATH`
+3. Check repository: `apt-cache policy cuda-toolkit`
 
 ### LXC Container Issues
 
@@ -200,14 +203,6 @@ After GPU passthrough is configured:
 1. Check device permissions: `ls -la /dev/nvidia*`
 2. Verify cgroup rules in container config
 3. Ensure container has `features: nesting=1`
-
-### Ollama Performance Issues
-
-**Problem**: Ollama not using GPU
-**Solution**:
-1. Check GPU visibility: `nvidia-smi` inside container
-2. Verify Ollama GPU support: `ollama ps` should show GPU models
-3. Check CUDA compatibility: Ensure CUDA version matches requirements
 
 ## Files Created
 
@@ -245,21 +240,21 @@ ansible-playbook playbook.yml --tags gpu-verify
 
 ## Performance Optimization
 
-For optimal Ollama performance:
+For optimal GPU performance:
 
 1. **Enable GPU persistence**: Reduces initialization time
-2. **Use appropriate CUDA version**: Matches Ollama requirements
-3. **Configure power limits**: Prevents thermal throttling
+2. **Use latest drivers**: Repository provides most recent stable versions
+3. **Configure power limits**: Prevents thermal throttling if needed
 4. **Monitor GPU utilization**: Use `nvidia-smi` to verify usage
 
 ## Version Compatibility
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| NVIDIA Driver | 535.x | Stable, long-term support |
-| CUDA Toolkit | 12.2 | Compatible with most AI workloads |
+| NVIDIA Driver | Latest from repo | Automatically selected by CUDA toolkit |
+| CUDA Toolkit | Latest from repo | Compatible with current drivers |
 | Proxmox VE | 7.0+ | Tested on current versions |
-| Ollama | Latest | Supports CUDA 11.0+ |
+| Debian | 11, 12 | Supports multiple Debian versions |
 
 ## Contributing
 
@@ -268,7 +263,7 @@ When modifying this role:
 1. Test on a development Proxmox environment first
 2. Verify LXC container functionality is not broken
 3. Update documentation for any new variables or features
-4. Test with actual Ollama workloads to ensure performance
+4. Test with actual GPU workloads to ensure performance
 
 ## License
 

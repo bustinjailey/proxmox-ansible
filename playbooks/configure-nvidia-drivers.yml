@@ -48,15 +48,15 @@
       debug:
         msg: |
           NVIDIA Driver Installation Summary:
-          - Driver Version: {{ nvidia_driver_version }}
-          - CUDA Version: {{ cuda_version }}
+          - Installation Method: Official NVIDIA Network Repository
+          - Package: cuda-toolkit (latest from repository)
           - LXC GPU Passthrough: Configured
           - Verification Script: /usr/local/bin/verify-lxc-gpu.sh
           
-          Next Steps for Ollama LXC:
+          Next Steps for LXC GPU Passthrough:
           1. Apply LXC configuration from verification script output
           2. Restart LXC container
           3. Install NVIDIA drivers inside container
           4. Test GPU access with nvidia-smi
-          5. Install/restart Ollama service
+          5. Install and configure your GPU workloads (Ollama, etc.)
       when: has_nvidia_gpu | default(false)
