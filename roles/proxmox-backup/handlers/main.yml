@@ -1,0 +1,4 @@
+---
+- name: restart pve-backup services
+  debug:
+    msg: "PVE backup hook configuration updated - no service restart required"

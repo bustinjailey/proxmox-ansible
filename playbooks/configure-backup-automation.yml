@@ -1,0 +1,120 @@
+---
+- name: Configure Proxmox Backup Automation
+  hosts: all
+  become: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  pre_tasks:
+    - name: Display backup automation configuration start message
+      debug:
+        msg: "Starting backup automation configuration for: {{ inventory_hostname }}"
+      when: backup_node | default(false)
+
+    - name: Verify SSH connectivity to fractal
+      wait_for:
+        host: "192.168.1.86"
+        port: 22
+        timeout: 10
+      delegate_to: localhost
+      become: no
+      run_once: true
+      when: backup_node | default(false)
+
+  roles:
+    - role: proxmox-backup
+      tags: ["backup", "automation", "wol"]
+      when: backup_node | default(false)
+
+  post_tasks:
+    - name: Verify backup hook script installation
+      stat:
+        path: /usr/local/bin/pve-backup-hook.sh
+      register: hook_script_stat
+
+    - name: Verify fractal wakeup script installation
+      stat:
+        path: /usr/local/bin/fractal-wakeup.sh
+      register: wakeup_script_stat
+
+    - name: Verify node file backup script installation
+      stat:
+        path: "/usr/local/bin/{{ inventory_hostname }}-file-backup.sh"
+      register: node_script_stat
+      when:
+        - backup_node | default(false)
+        - backup_file_paths | default([]) | length > 0
+
+    - name: Display installation verification results
+      debug:
+        msg: |
+          Backup automation installation verification:
+          - PVE backup hook: {{ 'INSTALLED' if hook_script_stat.stat.exists else 'MISSING' }}
+          - fractal wakeup script: {{ 'INSTALLED' if wakeup_script_stat.stat.exists else 'MISSING' }}
+          {% if backup_file_paths | default([]) | length > 0 %}
+          - {{ inventory_hostname }} backup script: {{ 'INSTALLED' if node_script_stat.stat.exists else 'MISSING' }}
+          {% endif %}
+      when: backup_node | default(false)
+
+    - name: Test wake-on-lan capability
+      shell: |
+        INTERFACE=$(ip route show default | awk '/default/ { print $5 }' | head -1)
+        echo "Detected interface: $INTERFACE"
+        if command -v ethtool >/dev/null 2>&1; then
+          echo "WOL capability:"
+          ethtool "$INTERFACE" | grep -i "wake-on" || echo "WOL information not available"
+        else
+          echo "ethtool not available for WOL verification"
+        fi
+      register: wol_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display wake-on-lan test results
+      debug:
+        var: wol_test.stdout_lines
+
+    - name: Verify backup mount point
+      stat:
+        path: /mnt/pve/backup_cluster
+      register: mount_point_stat
+
+    - name: Display mount point status
+      debug:
+        msg: |
+          Backup mount point status:
+          - Path exists: {{ 'YES' if mount_point_stat.stat.exists else 'NO' }}
+          - Is directory: {{ 'YES' if mount_point_stat.stat.isdir else 'NO' }}
+          {% if mount_point_stat.stat.exists %}
+          - Permissions: {{ mount_point_stat.stat.mode }}
+          {% endif %}
+
+    - name: Display cron job verification
+      shell: crontab -l | grep -E "(fractal-wakeup|{{ inventory_hostname }}-file-backup)" || echo "No backup cron jobs found"
+      register: cron_check
+      changed_when: false
+      failed_when: false
+      when: backup_node | default(false)
+
+    - name: Show configured cron jobs
+      debug:
+        msg: |
+          Configured backup cron jobs:
+          {{ cron_check.stdout_lines | join('\n') }}
+      when: backup_node | default(false)
+
+    - name: Display backup automation configuration completion message
+      debug:
+        msg: |
+          Backup automation configuration completed for: {{ inventory_hostname }}
+          
+          Configuration:
+          - Backup node: {{ backup_node | default(false) }}
+          - File backup paths: {{ backup_file_paths | default([]) | join(', ') if backup_file_paths | default([]) | length > 0 else 'None' }}
+
+          Next steps:
+          1. Ensure backup storage is mounted at /mnt/pve/backup_cluster
+          2. Configure Proxmox backup jobs in the web interface
+          3. Test the backup process manually before the scheduled time
+          4. Monitor logs at /var/log/fractal-wakeup.log and /var/log/{{ inventory_hostname }}-backup.log
+      when: backup_node | default(false)

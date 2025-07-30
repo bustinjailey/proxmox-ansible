@@ -12,6 +12,7 @@ This Ansible configuration manages a 4-node Proxmox cluster with the following f
 - Proxmox post-installation script automation
 - DNS configuration management
 - Automated updates for hosts, LXCs, and VMs
+- Automated backup coordination with wake-on-LAN support
 
 ### Cluster Nodes
 
@@ -134,6 +135,27 @@ ansible dell -m shell -a "nvidia-smi"
 ansible dell -m shell -a "/usr/local/bin/verify-lxc-gpu.sh"
 ```
 
+### Backup Automation Configuration
+
+Configure automated backup with wake-on-LAN for fractal:
+
+```bash
+ansible-playbook playbooks/configure-backup-automation.yml --ask-vault-pass
+```
+
+Configure backup automation as part of base configuration:
+
+```bash
+ansible-playbook playbooks/apply-base-configuration.yml --tags backup --ask-vault-pass
+```
+
+Test wake-on-LAN functionality:
+
+```bash
+ansible eagle -m shell -a "/usr/local/bin/fractal-wakeup.sh"
+ansible proxmox -m shell -a "/usr/local/bin/fractal-wakeup.sh"
+```
+
 ## Managing Secrets with Ansible Vault
 
 ### Using a Password File
@@ -192,6 +214,15 @@ ansible-vault view group_vars/proxmox_cluster/vault.yml
 - Supports APC SmartUPS 2200
 - Automatic shutdown coordination during power events
 
+### Backup Automation
+
+- Automated wake-on-LAN for fractal backup server
+- Coordinated backup execution with race condition handling
+- Eagle file backup with rsync to `/mnt/pve/backup_cluster/eagle-backup`
+- Smart shutdown coordination when all backups complete
+- Comprehensive logging and monitoring
+- Automatic network interface detection for WOL
+
 ### DNS Configuration
 
 - Primary DNS server: 192.168.1.187
@@ -245,6 +276,7 @@ proxmox-ansible/
 3. LXC and VM updates include error handling to prevent cascade failures
 4. The UPS configuration assumes the APC SmartUPS 2200 is connected to the eagle node
 5. All passwords should be stored in the Ansible vault, never in plain text
+6. Backup automation requires SSH key access to fractal and proper network configuration
 
 ## Troubleshooting
 
@@ -318,6 +350,70 @@ cat /etc/pve/lxc/<CONTAINER_ID>.conf
 # Test GPU in container
 pct enter <CONTAINER_ID>
 nvidia-smi  # Should work if drivers installed in container
+```
+
+### Backup Automation Issues
+
+Test backup automation setup:
+
+```bash
+# Run comprehensive backup test
+ssh root@eagle.bustinjailey.org
+/usr/local/bin/test-backup-workflow.sh
+
+ssh root@proxmox.bustinjailey.org
+/usr/local/bin/test-backup-workflow.sh
+```
+
+Test individual components:
+
+```bash
+# Test wake-on-LAN only
+/usr/local/bin/test-backup-workflow.sh wol
+
+# Test backup storage
+/usr/local/bin/test-backup-workflow.sh storage
+
+# Test fractal connectivity
+/usr/local/bin/test-backup-workflow.sh connectivity
+```
+
+Check backup logs:
+
+```bash
+# Monitor wake-up process
+tail -f /var/log/fractal-wakeup.log
+
+# Monitor eagle file backup
+tail -f /var/log/eagle-backup.log
+
+# Monitor backup hooks
+tail -f /var/log/syslog | grep pve-backup-hook
+```
+
+Manual backup testing:
+
+```bash
+# Test fractal wake-up manually
+/usr/local/bin/fractal-wakeup.sh
+
+# Test eagle file backup manually (eagle only)
+/usr/local/bin/eagle-file-backup.sh
+
+# Test backup hook manually
+/usr/local/bin/pve-backup-hook.sh job-start backup 100
+/usr/local/bin/pve-backup-hook.sh job-end backup 100
+```
+
+Check backup coordination:
+
+```bash
+# View active backup locks
+ls -la /mnt/pve/backup_cluster/.lock/
+
+# Check backup storage mount
+mountpoint /mnt/pve/backup_cluster
+df -h /mnt/pve/backup_cluster
 ```
 
 ## Contributing

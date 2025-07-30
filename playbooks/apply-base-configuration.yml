@@ -22,6 +22,9 @@
     - role: nut-ups
       tags: ["ups", "power"]
       when: enable_nut_ups | default(true)
+    - role: proxmox-backup
+      tags: ["backup", "automation", "wol"]
+      when: backup_node | default(false) and enable_backup_automation | default(true)
 
   post_tasks:
     - name: Display configuration completion message

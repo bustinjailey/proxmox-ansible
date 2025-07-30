@@ -1,0 +1,34 @@
+---
+# Proxmox Backup Automation Variables
+
+# Fractal server configuration
+fractal_ip: "192.168.1.86"
+fractal_mac: "a8:a1:59:0c:6a:ae"
+fractal_check_port: 445
+
+# Backup timing (PST)
+backup_time_pst: "21:00"
+wakeup_time_pst: "20:55"
+
+# Backup storage configuration
+backup_mount_point: "/mnt/pve/backup_cluster"
+backup_lock_dir: "{{ backup_mount_point }}/.lock"
+
+# Backup coordination
+shutdown_delay: 30
+fractal_startup_timeout: 300  # 5 minutes
+wol_retry_interval: 10
+
+# Logging configuration
+log_tag: "pve-backup-hook"
+
+# Script locations
+backup_hook_script: "/usr/local/bin/pve-backup-hook.sh"
+fractal_wakeup_script: "/usr/local/bin/fractal-wakeup.sh"
+node_file_backup_script: "/usr/local/bin/{{ inventory_hostname }}-file-backup.sh"
+
+# Required packages
+required_packages:
+  - etherwake
+  - netcat-openbsd
+  - rsync

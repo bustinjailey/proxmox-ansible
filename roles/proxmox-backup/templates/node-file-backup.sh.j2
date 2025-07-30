@@ -1,0 +1,169 @@
+#!/bin/bash
+set -e
+
+# Generic node file backup script for {{ inventory_hostname }}
+# This script backs up configured file paths to fractal
+
+BACKUP_NODE_IP="{{ fractal_ip }}"
+CHECK_PORT={{ fractal_check_port }}
+MOUNTPOINT="{{ backup_mount_point }}"
+DEST_BASE_DIR="{{ backup_mount_point }}/{{ inventory_hostname }}-backup"
+LOG_TAG="{{ log_tag }}-{{ inventory_hostname }}-files"
+
+# Backup paths configured for this node
+BACKUP_PATHS=(
+{% for path in backup_file_paths | default([]) %}
+    "{{ path }}"
+{% endfor %}
+)
+
+# --- Logging Functions ---
+log_info() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*"
+  logger -t "$LOG_TAG" "[INFO] $*"
+}
+
+log_warn() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARN] $*" >&2
+  logger -t "$LOG_TAG" "[WARN] $*"
+}
+
+log_error() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >&2
+  logger -t "$LOG_TAG" "[ERROR] $*"
+}
+
+# --- Functions ---
+is_backup_online() {
+  nc -z -w 2 "$BACKUP_NODE_IP" "$CHECK_PORT" 2>/dev/null
+}
+
+check_prerequisites() {
+  # Check if fractal is online
+  if ! is_backup_online; then
+    log_error "fractal backup server is not reachable at $BACKUP_NODE_IP:$CHECK_PORT"
+    return 1
+  fi
+
+  # Check if backup storage is mounted
+  if ! mountpoint -q "$MOUNTPOINT"; then
+    log_error "Backup mount point $MOUNTPOINT is not mounted"
+    return 1
+  fi
+
+  # Check if destination directory is accessible
+  if [ ! -d "$DEST_BASE_DIR" ]; then
+    log_info "Creating destination directory: $DEST_BASE_DIR"
+    mkdir -p "$DEST_BASE_DIR" || {
+      log_error "Failed to create destination directory: $DEST_BASE_DIR"
+      return 1
+    }
+  fi
+
+  return 0
+}
+
+backup_path() {
+  local source_path="$1"
+  local path_name=$(basename "$source_path")
+  local dest_dir="$DEST_BASE_DIR/$path_name"
+  
+  # Check if source path exists
+  if [ ! -e "$source_path" ]; then
+    log_warn "Source path does not exist: $source_path"
+    return 1
+  fi
+
+  log_info "Backing up $source_path to $dest_dir"
+  
+  # Create destination directory if needed
+  mkdir -p "$dest_dir"
+  
+  # Rsync options:
+  # -a: archive mode (preserves permissions, timestamps, etc.)
+  # -v: verbose
+  # -h: human-readable numbers
+  # --delete: delete files in destination that don't exist in source
+  # --delete-excluded: delete excluded files from destination
+  # --stats: show transfer statistics
+  # --log-file: log to file
+  local rsync_log="/var/log/{{ inventory_hostname }}-rsync-$(date +%Y%m%d-%H%M%S)-${path_name}.log"
+  
+  if rsync -avh --delete --delete-excluded --stats \
+           --log-file="$rsync_log" \
+           "$source_path/" "$dest_dir/"; then
+    
+    local backup_size=$(du -sh "$dest_dir" 2>/dev/null | cut -f1)
+    log_info "Successfully backed up $source_path (size: $backup_size)"
+    log_info "Rsync log: $rsync_log"
+    return 0
+  else
+    log_error "Failed to backup $source_path. Check rsync log: $rsync_log"
+    return 1
+  fi
+}
+
+perform_backup() {
+  local start_time=$(date '+%Y-%m-%d %H:%M:%S')
+  local start_timestamp=$(date +%s)
+  local failed_paths=()
+  
+  log_info "Starting {{ inventory_hostname }} file backup"
+  
+  if [ {% raw %}${#BACKUP_PATHS[@]}{% endraw %} -eq 0 ]; then
+    log_info "No backup paths configured for {{ inventory_hostname }}"
+    return 0
+  fi
+  
+  # Backup each configured path
+  for path in "${BACKUP_PATHS[@]}"; do
+    if ! backup_path "$path"; then
+      failed_paths+=("$path")
+    fi
+  done
+  
+  local end_timestamp=$(date +%s)
+  local duration=$((end_timestamp - start_timestamp))
+  local end_time=$(date '+%Y-%m-%d %H:%M:%S')
+  
+  log_info "{{ inventory_hostname }} file backup completed"
+  log_info "Start time: $start_time"
+  log_info "End time: $end_time"
+  log_info "Duration: ${duration} seconds"
+  
+  if [ {% raw %}${#failed_paths[@]}{% endraw %} -gt 0 ]; then
+    log_error "Failed to backup paths: ${failed_paths[*]}"
+    return 1
+  fi
+  
+  # Show total backup size
+  local total_backup_size=$(du -sh "$DEST_BASE_DIR" 2>/dev/null | cut -f1)
+  log_info "Total {{ inventory_hostname }} backup size: $total_backup_size"
+  
+  return 0
+}
+
+cleanup_old_logs() {
+  # Remove rsync logs older than 7 days
+  find /var/log -name "{{ inventory_hostname }}-rsync-*.log" -type f -mtime +7 -delete 2>/dev/null || true
+  log_info "Cleaned up old {{ inventory_hostname }} rsync logs"
+}
+
+# --- Main Execution ---
+log_info "=== {{ inventory_hostname }} File Backup Script Started ==="
+
+# Check prerequisites
+if ! check_prerequisites; then
+  log_error "Prerequisites check failed. Aborting {{ inventory_hostname }} backup."
+  exit 1
+fi
+
+# Perform the backup
+if perform_backup; then
+  log_info "{{ inventory_hostname }} file backup completed successfully"
+  cleanup_old_logs
+  exit 0
+else
+  log_error "{{ inventory_hostname }} file backup failed"
+  exit 1
+fi

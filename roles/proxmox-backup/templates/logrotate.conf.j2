@@ -1,0 +1,33 @@
+# Log rotation configuration for Proxmox backup automation
+
+/var/log/fractal-wakeup.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 root root
+}
+
+{% if backup_file_paths | default([]) | length > 0 -%}
+/var/log/{{ inventory_hostname }}-backup.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 root root
+}
+
+/var/log/{{ inventory_hostname }}-rsync-*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 root root
+}
+{% endif -%}

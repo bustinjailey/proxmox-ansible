@@ -1,0 +1,136 @@
+---
+- name: Install required packages for backup automation
+  apt:
+    name: "{{ required_packages }}"
+    state: present
+    update_cache: yes
+  when: backup_node | default(false)
+
+- name: Detect primary network interface for wake-on-lan
+  shell: |
+    # Find the interface with the default route
+    ip route show default | awk '/default/ { print $5 }' | head -1
+  register: detected_interface
+  changed_when: false
+  when: backup_node | default(false)
+
+- name: Set backup interface variable
+  set_fact:
+    backup_interface: "{{ detected_interface.stdout | default(backup_interface_fallback | default('eth0')) }}"
+  when: backup_node | default(false)
+
+- name: Verify wake-on-lan capability on detected interface
+  shell: |
+    ethtool {{ backup_interface }} | grep -i "wake-on" || echo "WOL not supported"
+  register: wol_check
+  changed_when: false
+  failed_when: false
+  when: backup_node | default(false)
+
+- name: Display wake-on-lan interface information
+  debug:
+    msg: |
+      Using interface: {{ backup_interface }}
+      WOL status: {{ wol_check.stdout }}
+  when: backup_node | default(false)
+
+- name: Ensure backup mount point exists
+  file:
+    path: "{{ backup_mount_point }}"
+    state: directory
+    mode: '0755'
+  when: backup_node | default(false)
+
+- name: Ensure backup lock directory exists
+  file:
+    path: "{{ backup_lock_dir }}"
+    state: directory
+    mode: '0755'
+  when: backup_node | default(false)
+
+- name: Deploy PVE backup hook script
+  template:
+    src: pve-backup-hook.sh.j2
+    dest: "{{ backup_hook_script }}"
+    mode: '0755'
+    owner: root
+    group: root
+  notify: restart pve-backup services
+  when: backup_node | default(false)
+
+- name: Deploy fractal wake-up script
+  template:
+    src: fractal-wakeup.sh.j2
+    dest: "{{ fractal_wakeup_script }}"
+    mode: '0755'
+    owner: root
+    group: root
+  when: backup_node | default(false)
+
+- name: Deploy generic file backup script
+  template:
+    src: node-file-backup.sh.j2
+    dest: "{{ node_file_backup_script }}"
+    mode: '0755'
+    owner: root
+    group: root
+  when:
+    - backup_node | default(false)
+    - backup_file_paths | default([]) | length > 0
+
+- name: Deploy backup workflow test script
+  copy:
+    src: "{{ playbook_dir }}/../scripts/test-backup-workflow.sh"
+    dest: "/usr/local/bin/test-backup-workflow.sh"
+    mode: '0755'
+    owner: root
+    group: root
+  when: backup_node | default(false)
+
+- name: Create backup destination directories for this node
+  file:
+    path: "{{ backup_mount_point }}/{{ inventory_hostname }}-backup"
+    state: directory
+    mode: '0755'
+  when:
+    - backup_node | default(false)
+    - backup_file_paths | default([]) | length > 0
+
+- name: Configure Proxmox backup hook
+  lineinfile:
+    path: /etc/vzdump.conf
+    line: "script: {{ backup_hook_script }}"
+    regexp: '^script:'
+    create: yes
+    backup: yes
+  notify: restart pve-backup services
+  when: backup_node | default(false)
+
+- name: Set up cron job for fractal wake-up
+  cron:
+    name: "Wake up fractal for backup"
+    minute: "55"
+    hour: "20"
+    job: "{{ fractal_wakeup_script }} >> /var/log/fractal-wakeup.log 2>&1"
+    user: root
+    state: present
+  when: backup_node | default(false)
+
+- name: Set up cron job for node file backup
+  cron:
+    name: "{{ inventory_hostname }} file backup to fractal"
+    minute: "0"
+    hour: "21"
+    job: "{{ node_file_backup_script }} >> /var/log/{{ inventory_hostname }}-backup.log 2>&1"
+    user: root
+    state: present
+  when:
+    - backup_node | default(false)
+    - backup_file_paths | default([]) | length > 0
+
+- name: Create log rotation configuration for backup logs
+  template:
+    src: logrotate.conf.j2
+    dest: /etc/logrotate.d/proxmox-backup
+    mode: '0644'
+  when: backup_node | default(false)

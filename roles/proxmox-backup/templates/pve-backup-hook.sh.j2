@@ -1,0 +1,124 @@
+#!/bin/bash
+set -e
+
+PHASE=$1
+MODE=$2
+VMID=$3
+
+# --- Config ---
+BACKUP_NODE_IP="{{ fractal_ip }}"
+BACKUP_NODE_MAC="{{ fractal_mac }}"
+BACKUP_INTERFACE="{{ backup_interface }}"
+MOUNTPOINT="{{ backup_mount_point }}"
+LOCK_DIR="{{ backup_lock_dir }}"
+LOCK_FILE="$LOCK_DIR/$(hostname).lock"
+SHUTDOWN_DELAY={{ shutdown_delay }}
+CHECK_PORT={{ fractal_check_port }}
+LOG_TAG="{{ log_tag }}"
+
+# --- Logging Functions ---
+log_info() {
+  echo "[INFO] $PHASE: $*"
+  logger -t "$LOG_TAG" "[INFO] $PHASE: $*"
+}
+
+log_warn() {
+  echo "[WARN] $PHASE: $*" >&2
+  logger -t "$LOG_TAG" "[WARN] $PHASE: $*"
+}
+
+log_error() {
+  echo "[ERROR] $PHASE: $*" >&2
+  logger -t "$LOG_TAG" "[ERROR] $PHASE: $*"
+}
+
+# --- Functions ---
+is_backup_online() {
+  nc -z -w 2 "$BACKUP_NODE_IP" "$CHECK_PORT"
+}
+
+wake_backup_node() {
+  log_info "Sending Wake-on-LAN to $BACKUP_NODE_MAC using $BACKUP_INTERFACE..."
+  /usr/sbin/etherwake -i "$BACKUP_INTERFACE" "$BACKUP_NODE_MAC"
+
+  log_info "Waiting for fractal to become reachable on port $CHECK_PORT..."
+  for i in {1..30}; do
+    sleep {{ wol_retry_interval }}
+    if is_backup_online; then
+      log_info "fractal is now online."
+      return 0
+    fi
+  done
+
+  log_error "Timed out waiting for fractal to start after Wake-on-LAN."
+  return 1
+}
+
+ensure_mount_available() {
+  if ! mountpoint -q "$MOUNTPOINT"; then
+    log_warn "Backup mount point $MOUNTPOINT is not mounted. Attempting to mount..."
+    mount "$MOUNTPOINT" || {
+      log_error "Failed to mount backup storage at $MOUNTPOINT"
+      return 1
+    }
+  fi
+  
+  if ! [ -d "$MOUNTPOINT" ] || ! [ -w "$MOUNTPOINT" ]; then
+    log_error "Backup mount point $MOUNTPOINT is not accessible or writable"
+    return 1
+  fi
+  
+  log_info "Backup storage is available at $MOUNTPOINT"
+  return 0
+}
+
+# --- Hook Logic ---
+case "$PHASE" in
+
+  "job-start")
+    log_info "Backup job started on host $(hostname) for VM/CT: $VMID"
+
+    if ! is_backup_online; then
+      wake_backup_node || exit 1
+    else
+      log_info "fractal is already online."
+    fi
+
+    # Ensure backup storage is mounted and accessible
+    ensure_mount_available || exit 1
+
+    # Ensure lock directory exists
+    mkdir -p "$LOCK_DIR"
+    echo "active" > "$LOCK_FILE"
+    log_info "Lock file created: $LOCK_FILE"
+    ;;
+
+  "job-end")
+    log_info "Backup job complete on $(hostname) for VM/CT: $VMID"
+
+    # Remove lock file for this node
+    if [[ -f "$LOCK_FILE" ]]; then
+      rm -f "$LOCK_FILE"
+      log_info "Removed lock file for $(hostname): $LOCK_FILE"
+    fi
+
+    # Count remaining lock files (active jobs from other nodes)
+    ACTIVE=$(find "$LOCK_DIR" -type f -name '*.lock' 2>/dev/null | wc -l)
+
+    if [[ "$ACTIVE" -eq 0 ]]; then
+      log_info "No remaining backup jobs detected. Initiating fractal shutdown..."
+      sleep "$SHUTDOWN_DELAY"
+      ssh root@"$BACKUP_NODE_IP" "shutdown -h now" && \
+        log_info "Shutdown signal sent to fractal." || \
+        log_error "Failed to send shutdown signal to fractal."
+    else
+      log_info "$ACTIVE backup job(s) still active. Skipping fractal shutdown."
+    fi
+    ;;
+
+  *)
+    # Silently ignore other phases
+    ;;
+esac
+
+exit 0

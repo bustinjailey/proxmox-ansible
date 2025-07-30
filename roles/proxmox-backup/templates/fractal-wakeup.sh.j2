@@ -1,0 +1,82 @@
+#!/bin/bash
+set -e
+
+# --- Config ---
+BACKUP_NODE_IP="{{ fractal_ip }}"
+BACKUP_NODE_MAC="{{ fractal_mac }}"
+BACKUP_INTERFACE="{{ backup_interface }}"
+CHECK_PORT={{ fractal_check_port }}
+LOG_TAG="{{ log_tag }}-wakeup"
+TIMEOUT={{ fractal_startup_timeout }}
+RETRY_INTERVAL={{ wol_retry_interval }}
+
+# --- Logging Functions ---
+log_info() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*"
+  logger -t "$LOG_TAG" "[INFO] $*"
+}
+
+log_warn() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARN] $*" >&2
+  logger -t "$LOG_TAG" "[WARN] $*"
+}
+
+log_error() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >&2
+  logger -t "$LOG_TAG" "[ERROR] $*"
+}
+
+# --- Functions ---
+is_backup_online() {
+  nc -z -w 2 "$BACKUP_NODE_IP" "$CHECK_PORT" 2>/dev/null
+}
+
+wake_backup_node() {
+  log_info "Starting fractal wake-up process from $(hostname)"
+  
+  if is_backup_online; then
+    log_info "fractal is already online at $BACKUP_NODE_IP:$CHECK_PORT"
+    return 0
+  fi
+
+  log_info "fractal is offline. Sending Wake-on-LAN packet..."
+  log_info "Target MAC: $BACKUP_NODE_MAC, Interface: $BACKUP_INTERFACE"
+  
+  # Send WOL packet
+  if ! /usr/sbin/etherwake -i "$BACKUP_INTERFACE" "$BACKUP_NODE_MAC"; then
+    log_error "Failed to send Wake-on-LAN packet to fractal"
+    return 1
+  fi
+
+  log_info "Wake-on-LAN packet sent to fractal. Waiting for response..."
+  
+  # Wait for server to come online
+  local elapsed=0
+  while [ $elapsed -lt $TIMEOUT ]; do
+    sleep $RETRY_INTERVAL
+    elapsed=$((elapsed + RETRY_INTERVAL))
+    
+    if is_backup_online; then
+      log_info "fractal is now online after ${elapsed} seconds"
+      return 0
+    fi
+    
+    if [ $((elapsed % 60)) -eq 0 ]; then
+      log_info "Still waiting for fractal... (${elapsed}/${TIMEOUT} seconds)"
+    fi
+  done
+
+  log_error "Timeout: fractal did not respond within $TIMEOUT seconds"
+  return 1
+}
+
+# --- Main Execution ---
+log_info "=== fractal Wake-up Script Started ==="
+
+if wake_backup_node; then
+  log_info "fractal wake-up completed successfully"
+  exit 0
+else
+  log_error "fractal wake-up failed"
+  exit 1
+fi
