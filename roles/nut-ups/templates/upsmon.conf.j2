@@ -1,7 +1,7 @@
 {% if ups_connected | default(false) %}
 MONITOR {{ nut_ups_name }}@localhost 1 upsmon {{ nut_upsmon_password }} master
 {% else %}
-MONITOR {{ nut_ups_name }}@{{ nut_server }} 1 upsmon {{ nut_upsmon_password }} slave
+MONITOR {{ nut_ups_name }}@{{ nut_server }} 1 upsmon_slave {{ nut_upsmon_password }} slave
 {% endif %}
 
 MINSUPPLIES 1

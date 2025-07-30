@@ -21,7 +21,7 @@
       when: enable_zabbix_monitoring | default(true)
     - role: nut-ups
       tags: ["ups", "power"]
-      when: enable_nut_ups | default(false)
+      when: enable_nut_ups | default(true)
 
   post_tasks:
     - name: Display configuration completion message
