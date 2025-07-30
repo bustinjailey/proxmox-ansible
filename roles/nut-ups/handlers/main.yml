@@ -3,13 +3,20 @@
   systemd:
     name: "{{ item }}"
     state: restarted
+    daemon_reload: yes
   loop:
     - nut-server
     - nut-monitor
   when: ups_connected | default(false)
+  ignore_errors: yes
 
-- name: restart nut
+- name: restart nut client
   systemd:
-    name: nut-monitor
+    name: "{{ item }}"
     state: restarted
+    daemon_reload: yes
+  loop:
+    - nut-monitor
+    - nut-client
   when: not (ups_connected | default(false))
+  ignore_errors: yes

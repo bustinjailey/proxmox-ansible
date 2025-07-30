@@ -1,18 +1,20 @@
 ---
-- name: Download Zabbix repository configuration
-  get_url:
-    url: "https://repo.zabbix.com/zabbix/6.4/debian/pool/main/z/zabbix-release/zabbix-release_6.4-1+debian12_all.deb"
-    dest: /tmp/zabbix-release.deb
-    mode: "0644"
-
-- name: Install Zabbix repository
-  apt:
-    deb: /tmp/zabbix-release.deb
+- name: Add Zabbix repository key
+  apt_key:
+    url: https://repo.zabbix.com/zabbix-official-repo.key
     state: present
+
+- name: Add Zabbix repository
+  apt_repository:
+    repo: "deb https://repo.zabbix.com/zabbix/6.0/debian {{ ansible_distribution_release }} main"
+    state: present
+    filename: zabbix
+  notify: update apt cache
 
 - name: Update apt cache
   apt:
     update_cache: yes
+  when: not ansible_check_mode
 
 - name: Install Zabbix agent 2
   apt:
@@ -26,6 +28,7 @@
     owner: root
     group: root
     mode: "0644"
+    backup: yes
   notify: restart zabbix-agent2
 
 - name: Ensure Zabbix agent 2 is running and enabled

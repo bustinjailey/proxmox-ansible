@@ -6,6 +6,10 @@
       - nut-client
       - nut-server
     state: present
+  notify: restart nut
+
+- name: Flush handlers to ensure services are available
+  meta: flush_handlers
 
 - name: Configure NUT mode
   template:
@@ -65,9 +69,36 @@
     - nut-server
   when: ups_connected | default(false)
 
-- name: Ensure NUT client service is running
+- name: Check available NUT services
+  shell: systemctl list-unit-files | grep -E '^nut-' | awk '{print $1}'
+  register: available_nut_services
+  changed_when: false
+  when: not (ups_connected | default(false))
+
+- name: Debug available NUT services
+  debug:
+    msg: "Available NUT services: {{ available_nut_services.stdout_lines }}"
+  when: not (ups_connected | default(false))
+
+- name: Ensure NUT client service is running (try nut-monitor first)
   systemd:
     name: nut-monitor
     state: started
     enabled: yes
-  when: not (ups_connected | default(false))
+  when:
+    - not (ups_connected | default(false))
+    - "'nut-monitor.service' in available_nut_services.stdout"
+  retries: 3
+  delay: 5
+
+- name: Ensure NUT client service is running (fallback to nut-client)
+  systemd:
+    name: nut-client
+    state: started
+    enabled: yes
+  when:
+    - not (ups_connected | default(false))
+    - "'nut-monitor.service' not in available_nut_services.stdout"
+    - "'nut-client.service' in available_nut_services.stdout"
+  retries: 3
+  delay: 5

@@ -1,5 +1,10 @@
 ---
+- name: update apt cache
+  apt:
+    update_cache: yes
+
 - name: restart zabbix-agent2
   systemd:
     name: zabbix-agent2
     state: restarted
+    daemon_reload: yes
