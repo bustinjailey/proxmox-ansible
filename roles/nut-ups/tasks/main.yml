@@ -59,46 +59,19 @@
     mode: "0640"
   notify: restart nut
 
-- name: Ensure NUT services are running
+- name: Ensure NUT server services are running (server only)
   systemd:
-    name: "{{ item }}"
+    name: nut-server
     state: started
     enabled: yes
-  loop:
-    - nut-monitor
-    - nut-server
   when: ups_connected | default(false)
+  retries: 3
+  delay: 5
 
-- name: Check available NUT services
-  shell: systemctl list-unit-files | grep -E '^nut-' | awk '{print $1}'
-  register: available_nut_services
-  changed_when: false
-  when: not (ups_connected | default(false))
-
-- name: Debug available NUT services
-  debug:
-    msg: "Available NUT services: {{ available_nut_services.stdout_lines }}"
-  when: not (ups_connected | default(false))
-
-- name: Ensure NUT client service is running (try nut-monitor first)
+- name: Ensure NUT monitor service is running (all hosts)
   systemd:
     name: nut-monitor
     state: started
     enabled: yes
-  when:
-    - not (ups_connected | default(false))
-    - "'nut-monitor.service' in available_nut_services.stdout"
-  retries: 3
-  delay: 5
-
-- name: Ensure NUT client service is running (fallback to nut-client)
-  systemd:
-    name: nut-client
-    state: started
-    enabled: yes
-  when:
-    - not (ups_connected | default(false))
-    - "'nut-monitor.service' not in available_nut_services.stdout"
-    - "'nut-client.service' in available_nut_services.stdout"
   retries: 3
   delay: 5

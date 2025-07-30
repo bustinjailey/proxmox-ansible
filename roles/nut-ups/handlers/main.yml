@@ -4,19 +4,10 @@
     name: "{{ item }}"
     state: restarted
     daemon_reload: yes
-  loop:
-    - nut-server
-    - nut-monitor
-  when: ups_connected | default(false)
-  ignore_errors: yes
-
-- name: restart nut client
-  systemd:
-    name: "{{ item }}"
-    state: restarted
-    daemon_reload: yes
-  loop:
-    - nut-monitor
-    - nut-client
-  when: not (ups_connected | default(false))
+  loop: "{{ nut_services_to_restart }}"
+  vars:
+    nut_services_to_restart: >-
+      {{
+        (['nut-server', 'nut-monitor'] if (ups_connected | default(false)) else ['nut-monitor'])
+      }}
   ignore_errors: yes
