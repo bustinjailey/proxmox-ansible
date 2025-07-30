@@ -40,4 +40,4 @@
 - name: Show post-install script output
   debug:
     msg: "{{ post_install_result.stdout_lines }}"
-  when: post_install_result.changed
+  when: post_install_result is defined and post_install_result.changed

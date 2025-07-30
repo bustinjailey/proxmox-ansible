@@ -79,7 +79,7 @@ cat inventories/production/hosts.yml
 Apply the base configuration to all nodes:
 
 ```bash
-ansible-playbook playbooks/configure-proxmox-node.yml --ask-vault-pass
+ansible-playbook playbooks/apply-base-configuration.yml --ask-vault-pass
 ```
 
 ### Update Operations
@@ -101,7 +101,7 @@ ansible-playbook playbooks/update-cluster.yml --limit eagle --ask-vault-pass
 Dry run to test changes without applying them:
 
 ```bash
-ansible-playbook playbooks/configure-proxmox-node.yml --check --ask-vault-pass
+ansible-playbook playbooks/apply-base-configuration.yml --check --ask-vault-pass
 ```
 
 ### Selective Configuration
@@ -109,7 +109,7 @@ ansible-playbook playbooks/configure-proxmox-node.yml --check --ask-vault-pass
 Skip the post-install script:
 
 ```bash
-ansible-playbook playbooks/configure-proxmox-node.yml --skip-tags post-install --ask-vault-pass
+ansible-playbook playbooks/apply-base-configuration.yml --skip-tags post-install --ask-vault-pass
 ```
 
 ## Managing Secrets with Ansible Vault
@@ -126,7 +126,7 @@ chmod 600 ~/.vault_pass
 Run playbooks with password file:
 
 ```bash
-ansible-playbook playbooks/configure-proxmox-node.yml --vault-password-file ~/.vault_pass
+ansible-playbook playbooks/apply-base-configuration.yml --vault-password-file ~/.vault_pass
 ```
 
 ### Editing Vault
@@ -200,7 +200,7 @@ proxmox-ansible/
 │   ├── nut-ups/
 │   └── post-pve-install/
 └── playbooks/
-    ├── configure-proxmox-node.yml
+    ├── apply-base-configuration.yml
     ├── update-cluster.yml
     ├── update-lxc.yml
     └── update-vm.yml
