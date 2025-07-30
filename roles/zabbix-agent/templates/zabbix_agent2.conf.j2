@@ -7,3 +7,9 @@ Hostname={{ zabbix_agent2_config.hostname }}
 Timeout={{ zabbix_agent2_config.timeout }}
 Include=/etc/zabbix/zabbix_agent2.d/*.conf
 ControlSocket=/tmp/agent.sock
+
+{% if has_nvidia_gpu | default(false) %}
+# NVIDIA GPU monitoring plugin configuration
+Plugins.Nvidia.Timeout=10
+Plugins.Nvidia.KeepAlive=300
+{% endif %}
