@@ -1,0 +1,185 @@
+---
+# NVIDIA Driver Installation for Proxmox with LXC GPU Passthrough Support
+# Optimized for Ollama and CUDA workloads
+
+- name: Display NVIDIA driver installation start message
+  debug:
+    msg: "Starting NVIDIA driver installation for {{ inventory_hostname }} ({{ nvidia_gpu_model | default('Unknown GPU') }})"
+
+- name: Check if NVIDIA GPU is present
+  shell: lspci | grep -i nvidia
+  register: nvidia_gpu_check
+  failed_when: false
+  changed_when: false
+
+- name: Fail if no NVIDIA GPU detected but expected
+  fail:
+    msg: "No NVIDIA GPU detected on {{ inventory_hostname }}, but has_nvidia_gpu is set to true"
+  when: 
+    - has_nvidia_gpu | default(false)
+    - nvidia_gpu_check.rc != 0
+
+- name: Skip NVIDIA installation if no GPU present
+  debug:
+    msg: "No NVIDIA GPU detected, skipping driver installation"
+  when: not (has_nvidia_gpu | default(false))
+
+# Only proceed if GPU is present and configured
+- block:
+    - name: Install required packages for NVIDIA driver compilation
+      apt:
+        name:
+          - build-essential
+          - dkms
+          - pve-headers
+          - "pve-headers-{{ ansible_kernel }}"
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Add NVIDIA official repository key
+      apt_key:
+        url: https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/3bf863cc.pub
+        state: present
+
+    - name: Add NVIDIA CUDA repository
+      apt_repository:
+        repo: "deb https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/ /"
+        state: present
+        filename: nvidia-cuda
+      notify: update apt cache
+
+    - name: Update apt cache after adding NVIDIA repository
+      apt:
+        update_cache: yes
+      when: not ansible_check_mode
+
+    - name: Install NVIDIA driver (specific version for stability)
+      apt:
+        name:
+          - "nvidia-driver-{{ nvidia_driver_version }}"
+          - "nvidia-utils-{{ nvidia_driver_version }}"
+          - nvidia-settings
+        state: present
+        update_cache: yes
+      notify: 
+        - reboot system
+        - wait for system
+
+    - name: Install CUDA toolkit for LXC container support
+      apt:
+        name:
+          - "cuda-toolkit-{{ cuda_version }}"
+          - nvidia-container-toolkit
+        state: present
+        update_cache: yes
+
+    - name: Create NVIDIA device nodes directory
+      file:
+        path: /dev/nvidia
+        state: directory
+        mode: '0755'
+
+    - name: Create NVIDIA device creation script
+      template:
+        src: create-nvidia-devices.sh.j2
+        dest: /usr/local/bin/create-nvidia-devices.sh
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Create systemd service for NVIDIA device creation
+      template:
+        src: nvidia-devices.service.j2
+        dest: /etc/systemd/system/nvidia-devices.service
+        mode: '0644'
+        owner: root
+        group: root
+      notify:
+        - reload systemd
+        - enable nvidia devices service
+
+    - name: Configure NVIDIA persistence daemon
+      template:
+        src: nvidia-persistenced.service.j2
+        dest: /etc/systemd/system/nvidia-persistenced.service
+        mode: '0644'
+        owner: root
+        group: root
+      notify:
+        - reload systemd
+        - enable nvidia persistence
+
+    - name: Set up LXC GPU passthrough configuration
+      template:
+        src: lxc-gpu-passthrough.conf.j2
+        dest: /etc/modprobe.d/lxc-gpu-passthrough.conf
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Configure NVIDIA module loading
+      template:
+        src: nvidia-modules.conf.j2
+        dest: /etc/modules-load.d/nvidia.conf
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Add NVIDIA library path to ld.so.conf
+      lineinfile:
+        path: /etc/ld.so.conf.d/nvidia.conf
+        line: "/usr/local/cuda/lib64"
+        create: yes
+        mode: '0644'
+      notify: update ldconfig
+
+    - name: Flush handlers to ensure system reboot if needed
+      meta: flush_handlers
+
+    - name: Verify NVIDIA driver installation
+      shell: nvidia-smi
+      register: nvidia_smi_result
+      failed_when: nvidia_smi_result.rc != 0
+      changed_when: false
+      retries: 3
+      delay: 10
+
+    - name: Display NVIDIA driver information
+      debug:
+        var: nvidia_smi_result.stdout_lines
+
+    - name: Verify CUDA installation
+      shell: nvcc --version
+      register: nvcc_result
+      failed_when: nvcc_result.rc != 0
+      changed_when: false
+
+    - name: Display CUDA version information
+      debug:
+        var: nvcc_result.stdout_lines
+
+    - name: Test GPU compute capability
+      shell: nvidia-smi -q -d compute
+      register: gpu_compute_result
+      failed_when: gpu_compute_result.rc != 0
+      changed_when: false
+
+    - name: Display GPU compute capabilities
+      debug:
+        msg: "GPU compute test successful - ready for Ollama and CUDA workloads"
+
+    - name: Create GPU verification script for LXC containers
+      template:
+        src: verify-lxc-gpu.sh.j2
+        dest: /usr/local/bin/verify-lxc-gpu.sh
+        mode: '0755'
+        owner: root
+        group: root
+
+  when: has_nvidia_gpu | default(false)
+
+- name: Display installation completion message
+  debug:
+    msg: "NVIDIA driver installation completed successfully for {{ inventory_hostname }}"
+  when: has_nvidia_gpu | default(false)

@@ -1,0 +1,89 @@
+#!/bin/bash
+# NVIDIA Device Node Creation Script for LXC GPU Passthrough
+# This script ensures NVIDIA device nodes are available for LXC containers
+
+set -e
+
+# Function to create device node if it doesn't exist
+create_device_node() {
+    local device_path="$1"
+    local major="$2"
+    local minor="$3"
+    local type="$4"
+    
+    if [ ! -e "$device_path" ]; then
+        echo "Creating device node: $device_path"
+        mknod "$device_path" "$type" "$major" "$minor"
+        chmod 666 "$device_path"
+    else
+        echo "Device node already exists: $device_path"
+    fi
+}
+
+# Ensure /dev/nvidia directory exists
+mkdir -p /dev/nvidia
+
+# Load NVIDIA modules if not already loaded
+for module in {{ nvidia_modules | join(' ') }}; do
+    if ! lsmod | grep -q "^$module "; then
+        echo "Loading NVIDIA module: $module"
+        modprobe "$module" || echo "Warning: Failed to load module $module"
+    fi
+done
+
+# Wait for modules to initialize
+sleep 2
+
+# Create NVIDIA device nodes
+echo "Creating NVIDIA device nodes for LXC passthrough..."
+
+# Get NVIDIA major device number
+NVIDIA_MAJOR=$(grep nvidia-frontend /proc/devices | cut -d' ' -f1)
+if [ -z "$NVIDIA_MAJOR" ]; then
+    echo "Warning: NVIDIA major device number not found in /proc/devices"
+    NVIDIA_MAJOR=195  # Default fallback
+fi
+
+# Create nvidia control device
+create_device_node "/dev/nvidiactl" "$NVIDIA_MAJOR" "255" "c"
+
+# Create nvidia device nodes (0-3 for multiple GPU support)
+for i in {0..3}; do
+    if [ -e "/proc/driver/nvidia/gpus/$i" ]; then
+        create_device_node "/dev/nvidia$i" "$NVIDIA_MAJOR" "$i" "c"
+    fi
+done
+
+# Get NVIDIA-UVM major device number
+UVM_MAJOR=$(grep nvidia-uvm /proc/devices | cut -d' ' -f1)
+if [ -n "$UVM_MAJOR" ]; then
+    create_device_node "/dev/nvidia-uvm" "$UVM_MAJOR" "0" "c"
+    create_device_node "/dev/nvidia-uvm-tools" "$UVM_MAJOR" "1" "c"
+else
+    echo "Warning: NVIDIA-UVM not found in /proc/devices"
+fi
+
+# Get NVIDIA-MODESET major device number
+MODESET_MAJOR=$(grep nvidia-modeset /proc/devices | cut -d' ' -f1)
+if [ -n "$MODESET_MAJOR" ]; then
+    create_device_node "/dev/nvidia-modeset" "$MODESET_MAJOR" "254" "c"
+else
+    echo "Warning: NVIDIA-MODESET not found in /proc/devices"
+fi
+
+# Set proper permissions for LXC access
+chmod 666 /dev/nvidia*
+
+# Verify device creation
+echo "NVIDIA device nodes created successfully:"
+ls -la /dev/nvidia*
+
+# Test basic NVIDIA functionality
+if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "Testing NVIDIA driver functionality..."
+    nvidia-smi -L || echo "Warning: nvidia-smi test failed"
+else
+    echo "Warning: nvidia-smi not found"
+fi
+
+echo "NVIDIA device setup completed for LXC GPU passthrough"

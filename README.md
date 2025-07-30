@@ -8,6 +8,7 @@ This Ansible configuration manages a 4-node Proxmox cluster with the following f
 
 - Automated Zabbix agent deployment and configuration
 - Network UPS Tools (NUT) configuration for power management
+- NVIDIA GPU drivers with CUDA support for LXC passthrough
 - Proxmox post-installation script automation
 - DNS configuration management
 - Automated updates for hosts, LXCs, and VMs
@@ -17,7 +18,7 @@ This Ansible configuration manages a 4-node Proxmox cluster with the following f
 - eagle.bustinjailey.org (UPS connected via USB)
 - proxmox.bustinjailey.org
 - fractal.bustinjailey.org
-- dell.bustinjailey.org
+- dell.bustinjailey.org (NVIDIA Quadro T2000 GPU for Ollama)
 
 ## Prerequisites
 
@@ -112,6 +113,27 @@ Skip the post-install script:
 ansible-playbook playbooks/apply-base-configuration.yml --skip-tags post-install --ask-vault-pass
 ```
 
+### NVIDIA GPU Configuration
+
+Install NVIDIA drivers on GPU-enabled nodes:
+
+```bash
+ansible-playbook playbooks/apply-base-configuration.yml --tags nvidia --ask-vault-pass
+```
+
+Install only on the Dell node:
+
+```bash
+ansible-playbook playbooks/apply-base-configuration.yml --limit dell --tags nvidia --ask-vault-pass
+```
+
+Verify GPU installation:
+
+```bash
+ansible dell -m shell -a "nvidia-smi"
+ansible dell -m shell -a "/usr/local/bin/verify-lxc-gpu.sh"
+```
+
 ## Managing Secrets with Ansible Vault
 
 ### Using a Password File
@@ -147,11 +169,21 @@ ansible-vault view group_vars/proxmox_cluster/vault.yml
 
 ## Features
 
+### NVIDIA GPU Support
+
+- Proxmox-compatible NVIDIA driver installation (driver version 535)
+- CUDA toolkit for compute workloads (CUDA 12.2)
+- LXC GPU passthrough configuration for containers
+- Automatic device node creation and management
+- Optimized for Ollama and AI workloads
+- Comprehensive verification and testing tools
+
 ### Zabbix Agent 2
 
 - Automatically installed and configured on all nodes
 - Reports to Zabbix server at 192.168.1.193
 - Configured with proper hostname for each node
+- Optional NVIDIA GPU monitoring support
 
 ### Network UPS Tools (NUT)
 
@@ -196,6 +228,7 @@ proxmox-ansible/
 │       └── vault.yml.example
 ├── roles/
 │   ├── common/
+│   ├── nvidia-drivers/
 │   ├── zabbix-agent/
 │   └── nut-ups/
 └── playbooks/
@@ -253,6 +286,38 @@ Check NUT client status on other nodes:
 ```bash
 ssh root@proxmox.bustinjailey.org
 upsc apc2200@eagle.bustinjailey.org
+```
+
+### NVIDIA/GPU Issues
+
+Check GPU status on Dell node:
+
+```bash
+ssh root@dell.bustinjailey.org
+nvidia-smi
+/usr/local/bin/verify-lxc-gpu.sh
+```
+
+Restart NVIDIA services:
+
+```bash
+ssh root@dell.bustinjailey.org
+systemctl restart nvidia-devices
+systemctl restart nvidia-persistenced
+```
+
+Check LXC GPU passthrough:
+
+```bash
+# Verify device nodes exist
+ls -la /dev/nvidia*
+
+# Check container configuration
+cat /etc/pve/lxc/<CONTAINER_ID>.conf
+
+# Test GPU in container
+pct enter <CONTAINER_ID>
+nvidia-smi  # Should work if drivers installed in container
 ```
 
 ## Contributing

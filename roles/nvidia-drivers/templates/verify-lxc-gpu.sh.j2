@@ -1,0 +1,123 @@
+#!/bin/bash
+# LXC GPU Verification Script for Ollama and CUDA workloads
+# This script helps verify that GPU passthrough is working correctly in LXC containers
+
+set -e
+
+echo "=== NVIDIA GPU LXC Verification Script ==="
+echo "This script verifies GPU passthrough configuration for LXC containers"
+echo
+
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check NVIDIA driver on host
+echo "1. Checking NVIDIA driver on Proxmox host..."
+if command_exists nvidia-smi; then
+    nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader,nounits
+    echo "✓ NVIDIA driver is working on host"
+else
+    echo "✗ nvidia-smi not found on host"
+    exit 1
+fi
+
+echo
+
+# Check NVIDIA device nodes
+echo "2. Checking NVIDIA device nodes..."
+for device in {{ nvidia_device_nodes | join(' ') }}; do
+    if [ -e "$device" ]; then
+        echo "✓ $device exists"
+        ls -la "$device"
+    else
+        echo "✗ $device missing"
+    fi
+done
+
+echo
+
+# Check NVIDIA modules
+echo "3. Checking NVIDIA kernel modules..."
+for module in {{ nvidia_modules | join(' ') }}; do
+    if lsmod | grep -q "^$module "; then
+        echo "✓ $module module loaded"
+    else
+        echo "✗ $module module not loaded"
+    fi
+done
+
+echo
+
+# Check CUDA installation
+echo "4. Checking CUDA installation..."
+if command_exists nvcc; then
+    echo "✓ CUDA compiler found:"
+    nvcc --version | grep "release"
+else
+    echo "✗ CUDA compiler (nvcc) not found"
+fi
+
+echo
+
+# Check library paths
+echo "5. Checking CUDA library paths..."
+{% for path in cuda_library_paths %}
+if [ -d "{{ path }}" ]; then
+    echo "✓ {{ path }} exists"
+    ls "{{ path }}" | grep -E "(libcuda|libcudart)" | head -3 || echo "  No CUDA libraries found"
+else
+    echo "✗ {{ path }} missing"
+fi
+{% endfor %}
+
+echo
+
+# LXC Configuration Helper
+echo "6. LXC Container Configuration Helper"
+echo "To enable GPU passthrough in your Ollama LXC container, add these lines to:"
+echo "/etc/pve/lxc/<CONTAINER_ID>.conf"
+echo
+echo "# GPU Device Access"
+{% for device in lxc_gpu_devices %}
+echo "lxc.cgroup2.devices.allow: {{ device }}"
+{% endfor %}
+echo
+echo "# Device Mounts"
+echo "lxc.mount.entry: /dev/nvidia0 dev/nvidia0 none bind,optional,create=file"
+echo "lxc.mount.entry: /dev/nvidiactl dev/nvidiactl none bind,optional,create=file"
+echo "lxc.mount.entry: /dev/nvidia-uvm dev/nvidia-uvm none bind,optional,create=file"
+echo "lxc.mount.entry: /dev/nvidia-uvm-tools dev/nvidia-uvm-tools none bind,optional,create=file"
+echo "lxc.mount.entry: /dev/nvidia-modeset dev/nvidia-modeset none bind,optional,create=file"
+echo
+echo "# Features"
+echo "features: nesting=1"
+echo
+
+# Test GPU compute capability
+echo "7. Testing GPU compute capability..."
+if command_exists nvidia-smi; then
+    echo "GPU Memory Usage:"
+    nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
+    echo
+    echo "GPU Processes:"
+    nvidia-smi pmon -c 1 2>/dev/null || echo "No active GPU processes"
+else
+    echo "Cannot test GPU compute - nvidia-smi not available"
+fi
+
+echo
+echo "=== Verification Complete ==="
+echo
+echo "Next steps for Ollama in LXC:"
+echo "1. Apply the LXC configuration shown above"
+echo "2. Restart the LXC container"
+echo "3. Inside the container, install NVIDIA Container Toolkit"
+echo "4. Test with: docker run --gpus all nvidia/cuda:11.0-base nvidia-smi"
+echo "5. Install and run Ollama with GPU support"
+echo
+echo "For troubleshooting, check:"
+echo "- Container logs: pct logs <CONTAINER_ID>"
+echo "- Device permissions: ls -la /dev/nvidia* inside container"
+echo "- CUDA availability: nvidia-smi inside container"

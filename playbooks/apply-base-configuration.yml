@@ -13,6 +13,9 @@
   roles:
     - role: common
       tags: ["common", "base"]
+    - role: nvidia-drivers
+      tags: ["nvidia", "gpu", "cuda"]
+      when: has_nvidia_gpu | default(false)
     - role: zabbix-agent
       tags: ["monitoring", "zabbix"]
       when: enable_zabbix_monitoring | default(true)

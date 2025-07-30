@@ -1,0 +1,62 @@
+---
+# Handlers for NVIDIA driver installation and configuration
+
+- name: update apt cache
+  apt:
+    update_cache: yes
+
+- name: reboot system
+  reboot:
+    reboot_timeout: 600
+    connect_timeout: 20
+    test_command: uptime
+  when: not ansible_check_mode
+
+- name: wait for system
+  wait_for_connection:
+    connect_timeout: 20
+    sleep: 5
+    delay: 5
+    timeout: 300
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: enable nvidia devices service
+  systemd:
+    name: nvidia-devices
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: enable nvidia persistence
+  systemd:
+    name: nvidia-persistenced
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: update ldconfig
+  shell: ldconfig
+  changed_when: false
+
+- name: load nvidia modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - nvidia
+    - nvidia_uvm
+    - nvidia_drm
+  failed_when: false
+
+- name: restart nvidia services
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: yes
+  loop:
+    - nvidia-devices
+    - nvidia-persistenced
+  failed_when: false

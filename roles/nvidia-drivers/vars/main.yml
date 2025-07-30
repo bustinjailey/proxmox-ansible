@@ -1,0 +1,54 @@
+---
+# NVIDIA Driver and CUDA versions for Proxmox compatibility
+# These versions are tested and stable for Proxmox environments
+
+# NVIDIA Driver version (without nvidia-driver- prefix)
+# Using 535 series for stability and broad compatibility
+nvidia_driver_version: "535"
+
+# CUDA version (major.minor format)
+# CUDA 12.2 is compatible with driver 535 and works well with Ollama
+cuda_version: "12-2"
+
+# NVIDIA device nodes that need to be created for LXC passthrough
+nvidia_device_nodes:
+  - /dev/nvidia0
+  - /dev/nvidia1
+  - /dev/nvidia2
+  - /dev/nvidia3
+  - /dev/nvidiactl
+  - /dev/nvidia-uvm
+  - /dev/nvidia-uvm-tools
+  - /dev/nvidia-modeset
+
+# NVIDIA kernel modules to load
+nvidia_modules:
+  - nvidia
+  - nvidia_uvm
+  - nvidia_drm
+  - nvidia_modeset
+
+# LXC GPU passthrough device mappings
+lxc_gpu_devices:
+  - "c 195:* rwm"  # nvidia devices
+  - "c 235:* rwm"  # nvidia-uvm devices
+  - "c 509:* rwm"  # nvidia-modeset devices
+
+# CUDA library paths for LXC containers
+cuda_library_paths:
+  - "/usr/local/cuda/lib64"
+  - "/usr/lib/x86_64-linux-gnu"
+  - "/usr/local/cuda/extras/CUPTI/lib64"
+
+# Verification commands
+nvidia_verification_commands:
+  - "nvidia-smi"
+  - "nvcc --version"
+  - "nvidia-smi -q -d compute"
+
+# Ollama-specific optimizations
+ollama_gpu_optimizations:
+  enable_persistence: true
+  enable_mig: false
+  power_limit: null  # Set to specific wattage if needed
+  compute_mode: "Default"  # Default, Exclusive_Thread, Prohibited, Exclusive_Process

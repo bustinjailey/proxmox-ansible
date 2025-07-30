@@ -1,0 +1,62 @@
+---
+- name: Configure NVIDIA drivers for GPU-enabled Proxmox nodes
+  hosts: proxmox_cluster
+  become: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  pre_tasks:
+    - name: Display NVIDIA configuration start message
+      debug:
+        msg: "Starting NVIDIA driver configuration for GPU-enabled nodes"
+
+    - name: Check if host has NVIDIA GPU configured
+      debug:
+        msg: "{{ inventory_hostname }} - GPU: {{ 'Enabled (' + nvidia_gpu_model + ')' if has_nvidia_gpu | default(false) else 'Not configured' }}"
+
+  roles:
+    - role: nvidia-drivers
+      tags: ["nvidia", "gpu", "cuda", "drivers"]
+      when: has_nvidia_gpu | default(false)
+
+  post_tasks:
+    - name: Display configuration completion message
+      debug:
+        msg: "NVIDIA driver configuration completed for: {{ inventory_hostname }}"
+      when: has_nvidia_gpu | default(false)
+
+    - name: Display skip message for non-GPU nodes
+      debug:
+        msg: "Skipped NVIDIA configuration for {{ inventory_hostname }} (no GPU configured)"
+      when: not (has_nvidia_gpu | default(false))
+
+    - name: Run GPU verification on configured nodes
+      shell: /usr/local/bin/verify-lxc-gpu.sh
+      register: gpu_verification
+      when: has_nvidia_gpu | default(false)
+      failed_when: false
+      changed_when: false
+
+    - name: Display GPU verification results
+      debug:
+        var: gpu_verification.stdout_lines
+      when: 
+        - has_nvidia_gpu | default(false)
+        - gpu_verification is defined
+
+    - name: Summary of NVIDIA driver installation
+      debug:
+        msg: |
+          NVIDIA Driver Installation Summary:
+          - Driver Version: {{ nvidia_driver_version }}
+          - CUDA Version: {{ cuda_version }}
+          - LXC GPU Passthrough: Configured
+          - Verification Script: /usr/local/bin/verify-lxc-gpu.sh
+          
+          Next Steps for Ollama LXC:
+          1. Apply LXC configuration from verification script output
+          2. Restart LXC container
+          3. Install NVIDIA drivers inside container
+          4. Test GPU access with nvidia-smi
+          5. Install/restart Ollama service
+      when: has_nvidia_gpu | default(false)

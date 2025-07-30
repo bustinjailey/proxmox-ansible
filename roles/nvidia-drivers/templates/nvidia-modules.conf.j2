@@ -1,0 +1,6 @@
+# NVIDIA kernel modules to load at boot
+# This ensures NVIDIA modules are available for LXC GPU passthrough
+
+{% for module in nvidia_modules %}
+{{ module }}
+{% endfor %}

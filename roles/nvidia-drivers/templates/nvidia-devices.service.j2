@@ -1,0 +1,14 @@
+[Unit]
+Description=Create NVIDIA device nodes for LXC GPU passthrough
+After=multi-user.target
+Wants=nvidia-persistenced.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/create-nvidia-devices.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
