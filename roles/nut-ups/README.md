@@ -78,7 +78,7 @@ Proxmox: nut-monitor (Client role)
 
 To verify the configuration works correctly:
 
-1. Run the playbook: `ansible-playbook playbooks/site.yml`
+1. Run the playbook: `ansible-playbook playbooks/configure-proxmox-node.yml`
 2. Check for reduced "skipping" messages in output
 3. Verify services are running:
    - Eagle: `systemctl status nut-server nut-monitor`
