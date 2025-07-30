@@ -1,0 +1,36 @@
+---
+- name: Update LXC {{ lxc_id }}
+  block:
+    - name: Check if LXC is running
+      shell: |
+        pct status {{ lxc_id }} | grep -q "status: running"
+      register: lxc_running
+      changed_when: false
+      failed_when: false
+
+    - name: Update LXC packages
+      shell: |
+        pct exec {{ lxc_id }} -- bash -c "apt-get update && apt-get -y upgrade && apt-get -y autoremove"
+      when: lxc_running.rc == 0
+      register: lxc_update_result
+      ignore_errors: yes
+
+    - name: Check for helper script update command
+      shell: |
+        pct exec {{ lxc_id }} -- bash -c "command -v update"
+      register: has_update_command
+      changed_when: false
+      failed_when: false
+      when: lxc_running.rc == 0
+
+    - name: Run helper script update
+      shell: |
+        pct exec {{ lxc_id }} -- bash -c "update"
+      when:
+        - lxc_running.rc == 0
+        - has_update_command.rc == 0
+      ignore_errors: yes
+  rescue:
+    - name: Log LXC update failure
+      debug:
+        msg: "Failed to update LXC {{ lxc_id }}: {{ ansible_failed_result.msg | default('Unknown error') }}"

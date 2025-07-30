@@ -1,0 +1,7 @@
+gitignore
+*.retry
+*.pyc
+__pycache__/
+.ansible/
+/tmp/
+ansible.log

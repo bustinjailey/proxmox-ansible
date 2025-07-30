@@ -1,0 +1,27 @@
+---
+- name: Download Proxmox VE post-install script
+  get_url:
+    url: https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/post-pve-install.sh
+    dest: /tmp/post-pve-install.sh
+    mode: "0755"
+
+- name: Run post-install script headless
+  shell: |
+    cat << EOF | bash /tmp/post-pve-install.sh
+    1
+    y
+    y
+    y
+    y
+    y
+    n
+    n
+    EOF
+  args:
+    creates: /etc/apt/sources.list.d/pve-no-subscription.list
+  register: post_install_result
+
+- name: Show post-install script output
+  debug:
+    msg: "{{ post_install_result.stdout_lines }}"
+  when: post_install_result.changed

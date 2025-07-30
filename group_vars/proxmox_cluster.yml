@@ -1,0 +1,21 @@
+# Common configuration for all Proxmox nodes
+zabbix_agent2_config:
+  server: "{{ zabbix_server_ip }}"
+  serveractive: "{{ zabbix_server_ip }}"
+  hostname: "{{ inventory_hostname }}.{{ domain }}"
+  timeout: 30
+  logfilesize: 100
+
+# NUT UPS configuration
+nut_mode: netclient
+nut_server: eagle.bustinjailey.org
+nut_ups_name: apc2200
+
+# DNS configuration
+dns_servers:
+  - "{{ dns_server }}"
+  - 8.8.8.8  # Fallback
+
+# Update configuration
+update_reboot_timeout: 600
+

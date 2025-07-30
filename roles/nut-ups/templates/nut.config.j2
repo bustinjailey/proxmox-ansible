@@ -1,0 +1,5 @@
+{% if ups_connected | default(false) %}
+MODE=netserver
+{% else %}
+MODE=netclient
+{% endif %}

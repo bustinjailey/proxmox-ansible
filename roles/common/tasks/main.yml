@@ -1,0 +1,17 @@
+---
+- name: Ensure Python dependencies are installed
+  apt:
+    name:
+      - python3-apt
+      - python3-pip
+      - python3-proxmoxer
+    state: present
+    update_cache: yes
+
+- name: Configure DNS servers
+  lineinfile:
+    path: /etc/resolv.conf
+    regexp: '^nameserver'
+    line: "nameserver {{ item }}"
+  loop: "{{ dns_servers }}"
+

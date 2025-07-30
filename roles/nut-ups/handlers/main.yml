@@ -1,0 +1,15 @@
+---
+- name: restart nut
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - nut-server
+    - nut-monitor
+  when: ups_connected | default(false)
+
+- name: restart nut
+  systemd:
+    name: nut-monitor
+    state: restarted
+  when: not (ups_connected | default(false))

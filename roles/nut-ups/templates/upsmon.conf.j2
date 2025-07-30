@@ -1,0 +1,40 @@
+{% if ups_connected | default(false) %}
+MONITOR {{ nut_ups_name }}@localhost 1 upsmon changeme master
+{% else %}
+MONITOR {{ nut_ups_name }}@{{ nut_server }} 1 upsmon changeme slave
+{% endif %}
+
+MINSUPPLIES 1
+SHUTDOWNCMD "/sbin/shutdown -h now"
+NOTIFYCMD /usr/sbin/upssched
+POLLFREQ 5
+POLLFREQALERT 5
+HOSTSYNC 15
+DEADTIME 15
+POWERDOWNFLAG /etc/killpower
+
+NOTIFYMSG ONLINE    "UPS %s is back online"
+NOTIFYMSG ONBATT    "UPS %s is on battery"
+NOTIFYMSG LOWBATT   "UPS %s battery is low"
+NOTIFYMSG FSD       "UPS %s: forced shutdown in progress"
+NOTIFYMSG COMMOK    "Communications with UPS %s established"
+NOTIFYMSG COMMBAD   "Communications with UPS %s lost"
+NOTIFYMSG SHUTDOWN  "Auto logout and shutdown proceeding"
+NOTIFYMSG REPLBATT  "UPS %s battery needs replacement"
+NOTIFYMSG NOCOMM    "UPS %s is unavailable"
+NOTIFYMSG NOPARENT  "upsmon parent process died - shutdown impossible"
+
+NOTIFYFLAG ONLINE    SYSLOG+WALL+EXEC
+NOTIFYFLAG ONBATT    SYSLOG+WALL+EXEC
+NOTIFYFLAG LOWBATT   SYSLOG+WALL
+NOTIFYFLAG FSD       SYSLOG+WALL+EXEC
+NOTIFYFLAG COMMOK    SYSLOG+WALL+EXEC
+NOTIFYFLAG COMMBAD   SYSLOG+WALL+EXEC
+NOTIFYFLAG SHUTDOWN  SYSLOG+WALL+EXEC
+NOTIFYFLAG REPLBATT  SYSLOG+WALL
+NOTIFYFLAG NOCOMM    SYSLOG+WALL+EXEC
+NOTIFYFLAG NOPARENT  SYSLOG+WALL
+
+RBWARNTIME 43200
+NOCOMMWARNTIME 300
+FINALDELAY 5

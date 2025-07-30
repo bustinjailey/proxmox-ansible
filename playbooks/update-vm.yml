@@ -1,0 +1,30 @@
+---
+- name: Update VM {{ vm_id }}
+  block:
+    - name: Check if VM is running
+      shell: |
+        qm status {{ vm_id }} | grep -q "status: running"
+      register: vm_running
+      changed_when: false
+      failed_when: false
+
+    - name: Check if QEMU guest agent is enabled
+      shell: |
+        qm config {{ vm_id }} | grep -q "agent: 1"
+      register: agent_enabled
+      changed_when: false
+      failed_when: false
+      when: vm_running.rc == 0
+
+    - name: Update VM packages (Debian/Ubuntu)
+      shell: |
+        qm guest exec {{ vm_id }} -- bash -c "apt-get update && apt-get -y upgrade && apt-get -y autoremove"
+      when:
+        - vm_running.rc == 0
+        - agent_enabled.rc == 0
+      register: vm_update_result
+      ignore_errors: yes
+  rescue:
+    - name: Log VM update failure
+      debug:
+        msg: "Failed to update VM {{ vm_id }}: {{ ansible_failed_result.msg | default('Unknown error') }}"

@@ -1,0 +1,9 @@
+PidFile=/run/zabbix/zabbix_agent2.pid
+LogFile=/var/log/zabbix/zabbix_agent2.log
+LogFileSize={{ zabbix_agent2_config.logfilesize }}
+Server={{ zabbix_agent2_config.server }}
+ServerActive={{ zabbix_agent2_config.serveractive }}
+Hostname={{ zabbix_agent2_config.hostname }}
+Timeout={{ zabbix_agent2_config.timeout }}
+Include=/etc/zabbix/zabbix_agent2.d/*.conf
+ControlSocket=/tmp/agent.sock

@@ -1,0 +1,9 @@
+---
+- name: Configure Proxmox cluster
+  hosts: proxmox_cluster
+  become: yes
+  roles:
+    - common
+    - zabbix-agent
+    - nut-ups
+    - post-pve-install

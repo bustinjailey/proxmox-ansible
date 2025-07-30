@@ -1,0 +1,73 @@
+---
+- name: Install NUT packages
+  apt:
+    name:
+      - nut
+      - nut-client
+      - nut-server
+    state: present
+
+- name: Configure NUT mode
+  template:
+    src: nut.conf.j2
+    dest: /etc/nut/nut.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  notify: restart nut
+
+- name: Configure UPS definitions (server only)
+  template:
+    src: ups.conf.j2
+    dest: /etc/nut/ups.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  when: ups_connected | default(false)
+  notify: restart nut
+
+- name: Configure UPS daemon (server only)
+  template:
+    src: upsd.conf.j2
+    dest: /etc/nut/upsd.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  when: ups_connected | default(false)
+  notify: restart nut
+
+- name: Configure UPS users (server only)
+  template:
+    src: upsd.users.j2
+    dest: /etc/nut/upsd.users
+    owner: root
+    group: nut
+    mode: "0640"
+  when: ups_connected | default(false)
+  notify: restart nut
+
+- name: Configure UPS monitor
+  template:
+    src: upsmon.conf.j2
+    dest: /etc/nut/upsmon.conf
+    owner: root
+    group: nut
+    mode: "0640"
+  notify: restart nut
+
+- name: Ensure NUT services are running
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - nut-monitor
+    - nut-server
+  when: ups_connected | default(false)
+
+- name: Ensure NUT client service is running
+  systemd:
+    name: nut-monitor
+    state: started
+    enabled: yes
+  when: not (ups_connected | default(false))
