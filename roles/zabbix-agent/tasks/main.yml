@@ -39,39 +39,18 @@
     daemon_reload: yes
 
 # NVIDIA GPU monitoring support
-- name: Install NVIDIA utilities for GPU monitoring
+- name: Install NVIDIA driver for GPU monitoring (Proxmox compatible)
   apt:
     name:
-      - nvidia-utils
+      - nvidia-driver
       - python3-pip
     state: present
     update_cache: yes
   when: has_nvidia_gpu | default(false)
 
 - name: Install NVIDIA ML Python bindings
-  pip:
-    name: nvidia-ml-py
+  apt:
+    name: python3-pynvml
     state: present
+    update_cache: yes
   when: has_nvidia_gpu | default(false)
-
-- name: Verify NVIDIA GPU detection
-  command: nvidia-smi --query-gpu=name --format=csv,noheader,nounits
-  register: nvidia_gpu_check
-  failed_when: false
-  changed_when: false
-  when: has_nvidia_gpu | default(false)
-
-- name: Display detected NVIDIA GPU
-  debug:
-    msg: "Detected NVIDIA GPU: {{ nvidia_gpu_check.stdout_lines | join(', ') }}"
-  when:
-    - has_nvidia_gpu | default(false)
-    - nvidia_gpu_check.rc == 0
-    - nvidia_gpu_check.stdout_lines | length > 0
-
-- name: Warning if NVIDIA GPU not detected
-  debug:
-    msg: "WARNING: NVIDIA GPU expected but not detected. Check drivers and hardware."
-  when:
-    - has_nvidia_gpu | default(false)
-    - (nvidia_gpu_check.rc != 0 or nvidia_gpu_check.stdout_lines | length == 0)
