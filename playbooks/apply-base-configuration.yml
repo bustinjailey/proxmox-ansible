@@ -4,7 +4,7 @@
   become: yes
   vars:
     ansible_python_interpreter: /usr/bin/python3
-  
+
   tasks:
     - name: Display configuration start message
       debug:
@@ -12,14 +12,12 @@
 
   roles:
     - role: common
-      tags: ['common', 'base']
-    - role: post-pve-install
-      tags: ['post-install', 'proxmox']
+      tags: ["common", "base"]
     - role: zabbix-agent
-      tags: ['monitoring', 'zabbix']
+      tags: ["monitoring", "zabbix"]
       when: enable_zabbix_monitoring | default(true)
     - role: nut-ups
-      tags: ['ups', 'power']
+      tags: ["ups", "power"]
       when: enable_nut_ups | default(false)
 
   post_tasks:

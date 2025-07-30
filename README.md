@@ -197,8 +197,7 @@ proxmox-ansible/
 ├── roles/
 │   ├── common/
 │   ├── zabbix-agent/
-│   ├── nut-ups/
-│   └── post-pve-install/
+│   └── nut-ups/
 └── playbooks/
     ├── apply-base-configuration.yml
     ├── update-cluster.yml
