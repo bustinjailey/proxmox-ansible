@@ -5,3 +5,8 @@ __pycache__/
 .ansible/
 /tmp/
 ansible.log
+# Vault password files
+.vault_pass
+*.vault
+# But don't ignore the example vault
+!vault.yml.example

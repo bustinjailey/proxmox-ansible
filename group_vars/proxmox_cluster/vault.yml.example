@@ -1,0 +1,5 @@
+# Example vault file - copy to vault.yml and encrypt with ansible-vault
+# ansible-vault create group_vars/proxmox_cluster/vault.yml
+
+# NUT UPS passwords
+nut_upsmon_password: "change-this-to-a-secure-password"

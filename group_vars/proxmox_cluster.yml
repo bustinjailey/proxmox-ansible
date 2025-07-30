@@ -11,11 +11,14 @@ nut_mode: netclient
 nut_server: eagle.bustinjailey.org
 nut_ups_name: apc2200
 
+# NUT passwords (should be overridden in vault.yml)
+nut_upsmon_password: "{{ vault_nut_upsmon_password | default('CHANGE_ME') }}"
+
 # DNS configuration
+dns_search: bustinjailey.org
 dns_servers:
-  - "{{ dns_server }}"
-  - 8.8.8.8  # Fallback
+  - 192.168.1.187
+  - 192.168.1.254
 
 # Update configuration
 update_reboot_timeout: 600
-
